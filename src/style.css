@@ -702,12 +702,12 @@ body {
   border-radius: 10px;
 }
 .t-boost {
-  /* 右下角：加速；左邊斬擊；上面鋼索（按鈕縮小、間距 8px） */
+  /* 右下角：加速；左邊斬擊；上面鋼索（間距 8px） */
   right: calc(16px + env(safe-area-inset-right, 0px));
   bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-  width: 44px;
-  height: 44px;
-  font-size: 11px;
+  width: 88px;
+  height: 88px;
+  font-size: 16px;
   background: conic-gradient(rgba(191, 231, 255, 0.35) var(--gas, 100%), rgba(10, 14, 20, 0.45) 0);
 }
 .t-boost.on {
@@ -715,11 +715,11 @@ body {
   box-shadow: 0 0 10px var(--gas);
 }
 .t-hook {
-  right: calc(14px + env(safe-area-inset-right, 0px));
-  bottom: calc(68px + env(safe-area-inset-bottom, 0px));
-  width: 48px;
-  height: 48px;
-  font-size: 12px;
+  right: calc(12px + env(safe-area-inset-right, 0px));
+  bottom: calc(112px + env(safe-area-inset-bottom, 0px));
+  width: 96px;
+  height: 96px;
+  font-size: 17px;
 }
 .t-hook span {
   display: block;
@@ -732,13 +732,13 @@ body {
 }
 .t-hookL,
 .t-hookR {
-  bottom: calc(68px + env(safe-area-inset-bottom, 0px));
-  width: 44px;
-  height: 44px;
-  font-size: 11px;
+  bottom: calc(112px + env(safe-area-inset-bottom, 0px));
+  width: 88px;
+  height: 88px;
+  font-size: 16px;
 }
 .t-hookL {
-  right: calc(68px + env(safe-area-inset-right, 0px));
+  right: calc(112px + env(safe-area-inset-right, 0px));
 }
 .t-hookR {
   right: calc(16px + env(safe-area-inset-right, 0px));
@@ -748,11 +748,11 @@ body {
   box-shadow: 0 0 10px var(--rope-r);
 }
 .t-strike {
-  right: calc(68px + env(safe-area-inset-right, 0px));
-  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
-  width: 48px;
-  height: 48px;
-  font-size: 12px;
+  right: calc(112px + env(safe-area-inset-right, 0px));
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  width: 96px;
+  height: 96px;
+  font-size: 17px;
   border-color: rgba(255, 181, 71, 0.8);
   background: rgba(60, 36, 8, 0.5);
 }
@@ -760,7 +760,7 @@ body {
   position: absolute;
   left: 12px;
   bottom: calc(12px + env(safe-area-inset-bottom));
-  max-width: 52vw;
+  max-width: calc(100vw - 240px); /* 不壓到右下角的按鈕 */
   font-size: 11px;
   line-height: 1.5;
   color: rgba(255, 255, 255, 0.6);
