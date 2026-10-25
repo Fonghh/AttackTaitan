@@ -31,8 +31,8 @@ export class Input {
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => {
       this.keys.clear();
-      if (this.mouse.left) this.queue.push('releaseLeft');
-      if (this.mouse.right) this.queue.push('releaseRight');
+      if (this.mouse.left) this.queue.push('up:left');
+      if (this.mouse.right) this.queue.push('up:right');
       this.mouse.left = this.mouse.right = false;
     });
 
@@ -41,19 +41,19 @@ export class Input {
       if (!this.enabled || !this.locked) return;
       if (e.button === 0) {
         this.mouse.left = true;
-        this.queue.push('fireLeft');
+        this.queue.push('down:left');
       } else if (e.button === 2) {
         this.mouse.right = true;
-        this.queue.push('fireRight');
+        this.queue.push('down:right');
       }
     });
     addEventListener('mouseup', (e) => {
       if (e.button === 0 && this.mouse.left) {
         this.mouse.left = false;
-        this.queue.push('releaseLeft');
+        this.queue.push('up:left');
       } else if (e.button === 2 && this.mouse.right) {
         this.mouse.right = false;
-        this.queue.push('releaseRight');
+        this.queue.push('up:right');
       }
     });
     addEventListener('mousemove', (e) => {
@@ -107,17 +107,9 @@ export class Input {
     }
     const space = k.has('Space');
     const boost = k.has('ShiftLeft') || k.has('ShiftRight') || t.boost;
-    // 捲收：Space = 強；W = 弱；手機搖桿往前推 = 依推的程度
-    let reel = 0;
-    let reelStrong = false;
-    if (space) {
-      reel = 1;
-      reelStrong = true;
-    } else if (t.active && t.joyY > 0.15) {
-      reel = t.joyY;
-    } else if (k.has('KeyW')) {
-      reel = 0.15;
-    }
+    // 捲收：只有 Space（電腦）。手機搖桿往前推只是往前飛，不再捲收（避免被拉去撞牆）
+    const reel = space ? 1 : 0;
+    const reelStrong = space;
     const intent = {
       move: { x: mx, y: my },
       boost,

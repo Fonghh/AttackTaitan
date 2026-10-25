@@ -32,6 +32,7 @@ export class Hud {
       flash: $('flash'),
       hurt: $('hurt'),
       hang: $('hang-ind'),
+      crosshair: $('crosshair'),
     };
     this.toastTimer = 0;
   }
@@ -125,13 +126,16 @@ export class Hud {
       if (label) el.dataset.label = label;
     };
     if (touchMode === 'smart') {
-      showMark(e.mark.smart, aims.smart, smartSide === 'left' ? 'L' : 'R');
+      showMark(e.mark.smart, aims.auto, smartSide === 'left' ? 'L' : 'R');
       e.mark.left.className = e.mark.right.className = 'aim-mark hidden';
     } else {
       showMark(e.mark.left, aims.left, 'L');
       showMark(e.mark.right, aims.right, 'R');
       e.mark.smart.className = 'aim-mark hidden';
     }
+
+    // 準星：附近沒有可勾目標時變紅
+    e.crosshair.classList.toggle('no-target', !(aims.auto || aims.left || aims.right));
 
     // 弱點提示
     if (titan.alive) {

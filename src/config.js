@@ -15,7 +15,7 @@ export const CONFIG = {
     dragCoef: 0.00012,
     maxHp: 100,
     invulnTime: 1.0,
-    spawn: { x: 25, y: 45, z: 125 },
+    spawn: { x: 12, y: 45, z: 125 },
   },
 
   // 落地滑行
@@ -28,17 +28,29 @@ export const CONFIG = {
   hook: {
     range: 85,
     travelSpeed: 260, // 鉤爪飛行速度（視覺 + 命中延遲）
-    aimOffsetDeg: 10, // 左右鋼索相對準星的偏角
-    assistDegDesktop: 5,
-    assistDegTouch: 10,
-    initialSlack: 0.98, // 勾住瞬間的繩長 = 距離 × 此值（產生一點拉扯）
-    autoReel: 2.5, // 勾住期間的輕微自動收緊（m/s）
-    reelSpeed: 22, // 強捲收（Space / 搖桿往前推到底）
-    reelAccel: 34,
-    weakReelSpeed: 9, // 電腦 W 的弱捲收
-    weakReelAccel: 12,
+    aimOffsetDeg: 10, // 雙索模式：左右鋼索相對準星的偏角
+    initialSlack: 1.0, // 勾住瞬間的繩長 = 距離 × 此值（1 = 不會瞬間拉動位置）
+    reelAccel: 32, // 捲收時朝勾點的推力（m/s²），只加速度、不直接搬動位置
+    swingPump: 5, // 繃緊擺盪時沿切線方向的推力，讓擺盪越盪越快
+    boostSwing: 1.0, // 勾住時加速：推力沿擺盪切線方向（倍率）
     minLength: 2.5,
-    maxSlack: 0.6, // 繩子最多比實際距離長多少（避免一直鬆垮）
+    maxCorrection: 0.35, // 每個子步驟鋼索最多修正的位置量（防止瞬移）
+    minHold: 0.3, // 快速點按：勾住後至少保持這麼久才放開
+    wallRunUp: 0.55, // 勾住時撞牆：撞擊速度的這個比例轉成沿牆往上的速度
+    // 擺盪輔助瞄準：準星打中的點不夠高時，在附近找更高的勾點
+    swingAim: {
+      goodHeight: 6, // 準星直接打中的點比角色高這麼多 → 直接採用
+      yawSteps: [0, 7, -7, 14, -14, 21, -21],
+      pitchSteps: [0, 7, 14, 21, 28],
+      heightWeight: 0.7, // 每高 1m 相當於離準星近幾度
+      maxHeightBonus: 30,
+      lowPenalty: 20, // 勾點不比角色高時的懲罰（度）
+      headOnDot: 0.75, // 牆面法線與視線的夾角餘弦超過此值視為「正對著」
+      headOnDist: 60,
+      headOnPenalty: 14,
+      minClearance: 8, // 擺盪最低點至少離地幾公尺
+      groundPenalty: 30,
+    },
   },
 
   boost: {
@@ -112,9 +124,13 @@ export const CONFIG = {
     minHFov: 78, // 直立手機時保證的最小水平視角
     maxVFov: 105,
     offsetSmooth: 10,
-    autoFollowRate: 1.6,
-    autoFollowDelay: 1.0,
-    joystickTurnRate: 1.7,
+    autoFollow: true, // 空中自動轉向飛行方向（暫停選單可關閉）
+    autoFollowRate: 2.2,
+    autoFollowDelayMouse: 0.9, // 滑鼠停止移動多久後開始跟隨
+    autoFollowDelayTouch: 0.7,
+    followSmoothTime: 0.4, // 飛行方向的平滑時間（擺盪時不會急轉）
+    followPitch: -0.14,
+    joystickTurnRate: 1.0,
   },
 
   speedLines: {

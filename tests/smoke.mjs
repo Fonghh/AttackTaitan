@@ -71,36 +71,52 @@ try {
     // 1) 往巨人方向跑下塔頂
     for (let i = 0; i < 60; i++) step({ ...base(), move: { x: 0, y: 1 } });
     // 2) 視角略為朝上，射出鋼索
-    // 往左看向街道，用左鋼索勾住街邊建築的側面 → 沿街擺盪（正面勾牆會直接撞上去）
+    // 新手操作：不調整視角，直接朝巨人方向按住鋼索（擺盪輔助會挑街邊高處的勾點）
     g.rig.pitch = 0.05;
-    g.rig.yaw += 0.4;
     for (let i = 0; i < 3; i++) step();
-    const aimBefore = !!g.aims.left;
-    step({ ...base(), events: ['fireLeft'] });
+    const aimBefore = !!g.aims.auto;
+    step({ ...base(), events: ['down:left'] });
     // 3) 擺盪直到往上甩，再放開
     let t = 0;
     let wasDown = false;
+    let prevPos = g.pc.pos.clone();
+    log.maxJump = 0;
     while (t < 4) {
       step();
       t += dt;
+      log.maxJump = Math.max(log.maxJump, g.pc.pos.distanceTo(prevPos) - g.pc.speed * dt);
+      prevPos = g.pc.pos.clone();
       if (g.pc.anyAttached) log.attached = true;
       if (log.attached && g.pc.vel.y < -3) wasDown = true;
-      if (log.attached && wasDown && g.pc.vel.y > 4) break;
+      if (log.attached && wasDown && g.pc.vel.y > 3) break;
     }
+    log.swingMinY = g.pc.pos.y;
     const vyBefore = g.pc.vel.y;
-    g.pc.releaseAll(); // 直接放開，量測放開瞬間的上甩加成
+    g._hookUp('auto'); // 放開按鍵
     log.released = !g.pc.anyAttached;
     log.flingY = g.pc.vel.y / Math.max(0.01, vyBefore);
     for (const e of g.pc.events.splice(0)) g._onPlayerEvent(e);
     const speedAfterRelease = g.pc.speed;
-    for (let i = 0; i < 90; i++) step({ ...base(), boost: i < 40 });
-    return { aimBefore, ...log, speedAfterRelease, pos: g.pc.pos.toArray().map((v) => +v.toFixed(1)) };
+    // 4) 空中再勾第二次（連續擺盪）
+    for (let i = 0; i < 20; i++) step();
+    step({ ...base(), events: ['down:left'] });
+    let swing2 = false;
+    for (let i = 0; i < 90; i++) {
+      step({ ...base(), boost: i < 40 });
+      if (g.pc.anyAttached) swing2 = true;
+    }
+    step({ ...base(), events: ['up:left'] });
+    for (let i = 0; i < 30; i++) step();
+    return { aimBefore, ...log, swing2, speedAfterRelease, pos: g.pc.pos.toArray().map((v) => +v.toFixed(1)) };
   });
-  check('hook aim finds a target from the spawn tower', sim.aimBefore);
+  check('hook aim finds a target from the spawn tower (default view)', sim.aimBefore);
+  check('no teleport during swing', sim.maxJump < 0.3, `max extra move ${sim.maxJump.toFixed(2)}m/frame`);
+  check('swing goes down then back up (real pendulum)', sim.attached && sim.swingMinY > 3, `release height ${sim.swingMinY.toFixed(1)}m`);
+  check('second hook in mid-air attaches (chained swing)', sim.swing2);
   check('rope attaches to a building', sim.attached);
   check('rope length constraint respected in real scene', sim.ropeViolation < 0.05, `max excess ${sim.ropeViolation.toFixed(3)}m`);
-  check('swing + boost builds speed', sim.maxSpeed > 25, `max ${sim.maxSpeed.toFixed(1)} m/s`);
-  check('release keeps momentum', sim.released && sim.speedAfterRelease > 10, `${sim.speedAfterRelease.toFixed(1)} m/s`);
+  check('swing + boost builds speed', sim.maxSpeed > 28, `max ${sim.maxSpeed.toFixed(1)} m/s`);
+  check('release keeps momentum', sim.released && sim.speedAfterRelease > 18, `${sim.speedAfterRelease.toFixed(1)} m/s`);
   check('upward release bonus applied', sim.flingY > 1.1, `vy x${sim.flingY.toFixed(2)}`);
   check('apex hang triggered', sim.hung);
 
@@ -217,22 +233,40 @@ try {
   await mp.waitForTimeout(600);
   const touchInfo = await mp.evaluate(() => {
     const g = window.__game;
-    return { touch: g.touch, mode: g.touchUI.mode, smartVisible: !document.querySelector('.t-hook').hidden };
+    return { touch: g.touch, mode: g.hookMode, smartVisible: !document.querySelector('.t-hook').hidden };
   });
-  check('mobile: touch UI with smart hook button', touchInfo.touch && touchInfo.smartVisible);
-  // 點鋼索鈕 → 應該發射
+  check('mobile: touch UI with single hook button', touchInfo.touch && touchInfo.smartVisible);
+  // 快速點一下鋼索鈕 → 仍然要發射，且至少勾住 minHold 後才放
   await mp.evaluate(() => {
-    window.__game.rig.pitch = 0.05;
+    const g = window.__game;
+    g.rig.pitch = 0.05;
+    window.__fired = 0;
+    window.__attached = 0;
+    const f = g.pc.fireHook.bind(g.pc);
+    g.pc.fireHook = (...a) => (window.__fired++, f(...a));
+    const id = setInterval(() => g.pc.anyAttached && window.__attached++, 16);
+    setTimeout(() => clearInterval(id), 30000);
   });
   await mp.waitForTimeout(300);
   const box = await mp.locator('.t-hook').boundingBox();
   await mp.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
-  await mp.waitForTimeout(500);
-  const fired = await mp.evaluate(() => {
-    const h = window.__game.pc.hooks;
-    return h.left.active || h.right.active;
-  });
-  check('mobile: tapping hook button fires a rope', fired);
+  // 無頭瀏覽器渲染很慢，用條件等待而不是固定時間
+  await mp.waitForFunction(() => window.__attached > 0 && !window.__game.pc.anyAttached, null, { timeout: 30000 }).catch(() => {});
+  const tap = await mp.evaluate(() => ({ fired: window.__fired, attached: window.__attached, active: window.__game.pc.anyAttached }));
+  check('mobile: quick tap fires a rope and gives a short swing', tap.fired === 1 && tap.attached > 0 && !tap.active, JSON.stringify(tap));
+  // 按住：持續勾住
+  await mp.evaluate(() => window.__game.restart(true));
+  await mp.waitForTimeout(200);
+  await mp.evaluate(() => (window.__game.rig.pitch = 0.05));
+  await mp.waitForTimeout(200);
+  const hb = await mp.locator('.t-hook').boundingBox();
+  await mp.dispatchEvent('.t-hook', 'pointerdown', { pointerId: 7, isPrimary: true, clientX: hb.x + 10, clientY: hb.y + 10 });
+  await mp.waitForFunction(() => window.__game.pc.hooks.left.attachTime > 0.6 || window.__game.pc.hooks.right.attachTime > 0.6, null, { timeout: 30000 }).catch(() => {});
+  const held = await mp.evaluate(() => window.__game.pc.anyAttached);
+  await mp.dispatchEvent('.t-hook', 'pointerup', { pointerId: 7, isPrimary: true });
+  await mp.waitForFunction(() => !window.__game.pc.anyAttached, null, { timeout: 10000 }).catch(() => {});
+  const releasedAfter = await mp.evaluate(() => !window.__game.pc.anyAttached);
+  check('mobile: holding keeps the rope, releasing lets go', held && releasedAfter, `held=${held} released=${releasedAfter}`);
   await mp.screenshot({ path: `${OUT}/05-mobile.png` });
   check('no page errors (mobile)', merr.length === 0, merr.slice(0, 3).join(' | '));
 } finally {

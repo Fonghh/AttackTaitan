@@ -1,17 +1,12 @@
 // 手機觸控操作：左下動態搖桿、右側按鈕、空白處拖曳轉視角。
-// 鋼索按鈕兩種模式：'smart'（智慧單鉤，預設）與 'dual'（右側雙鉤）。
-
-const LONG_PRESS = 0.3;
+// 鋼索按鈕：'single'（單索，按住＝勾住擺盪、放開＝放索，預設）／'dual'（左右雙鉤，各自按住）。
 
 export class TouchControls {
   constructor(root, input, cfg) {
     this.input = input;
     this.cfg = cfg;
     this.root = root;
-    this.mode = 'smart';
-    try {
-      this.mode = localStorage.getItem('hookMode') || 'smart';
-    } catch {}
+    this.mode = 'single';
     this.joy = null; // { id, ox, oy }
     this.looks = new Map(); // pointerId → {x, y}
 
@@ -19,20 +14,18 @@ export class TouchControls {
       <div class="joy-base" hidden><div class="joy-knob"></div></div>
       <button class="tbtn t-pause" data-act="pause" aria-label="暫停">II</button>
       <button class="tbtn t-boost" data-act="boost">加速</button>
-      <button class="tbtn t-hook" data-act="smart">鋼索</button>
-      <button class="tbtn t-hookL" data-act="toggleLeft">左鉤</button>
-      <button class="tbtn t-hookR" data-act="toggleRight">右鉤</button>
-      <button class="tbtn t-release" data-act="releaseAll">全解除</button>
+      <button class="tbtn t-hook" data-hold="auto">鋼索<small>按住</small></button>
+      <button class="tbtn t-hookL" data-hold="left">左鉤</button>
+      <button class="tbtn t-hookR" data-hold="right">右鉤</button>
       <button class="tbtn t-strike" data-act="strike">斬擊</button>
-      <div class="t-hint">左下拖曳＝移動／往前推＝捲收　空白處拖曳＝轉視角</div>`;
+      <div class="t-hint">按住「鋼索」擺盪，往上甩時放開。左下拖曳＝移動，空白處拖曳＝轉視角</div>`;
     this.base = root.querySelector('.joy-base');
     this.knob = root.querySelector('.joy-knob');
     this.btn = {
       boost: root.querySelector('.t-boost'),
-      smart: root.querySelector('.t-hook'),
+      auto: root.querySelector('.t-hook'),
       left: root.querySelector('.t-hookL'),
       right: root.querySelector('.t-hookR'),
-      release: root.querySelector('.t-release'),
       strike: root.querySelector('.t-strike'),
     };
     this.applyMode();
@@ -47,64 +40,61 @@ export class TouchControls {
 
   setMode(mode) {
     this.mode = mode;
-    try {
-      localStorage.setItem('hookMode', mode);
-    } catch {}
     this.applyMode();
   }
 
   applyMode() {
-    const smart = this.mode === 'smart';
-    this.btn.smart.hidden = !smart;
-    this.btn.left.hidden = smart;
-    this.btn.right.hidden = smart;
-    this.btn.release.hidden = smart;
+    const single = this.mode === 'single';
+    this.btn.auto.hidden = !single;
+    this.btn.left.hidden = single;
+    this.btn.right.hidden = single;
   }
 
   show(on) {
     this.root.hidden = !on;
     this.input.touch.active = on;
+    if (!on) this._releaseAll();
+  }
+
+  _releaseAll() {
+    for (const b of this.root.querySelectorAll('.tbtn.pressed')) {
+      b.classList.remove('pressed');
+      if (b.dataset.hold) this.input.push(`up:${b.dataset.hold}`);
+    }
+    this.input.touch.boost = false;
   }
 
   /** 依鋼索狀態讓按鈕亮起 */
-  sync(pc) {
+  sync(pc, canHook) {
     const l = pc.hooks.left.active, r = pc.hooks.right.active;
     this.btn.left.classList.toggle('on', l);
     this.btn.right.classList.toggle('on', r);
-    this.btn.smart.classList.toggle('on', l || r);
-    this.btn.smart.textContent = l && r ? '鋼索×2' : '鋼索';
+    this.btn.auto.classList.toggle('on', l || r);
+    this.btn.auto.classList.toggle('no-target', !canHook && !(l || r));
     this.btn.boost.classList.toggle('on', pc.boosting);
     this.btn.boost.style.setProperty('--gas', `${(pc.gas / this.cfg.boost.gasMax) * 100}%`);
   }
 
   _bindButton(b) {
     const act = b.dataset.act;
+    const hold = b.dataset.hold;
     b.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      b.setPointerCapture?.(e.pointerId);
+      try {
+        b.setPointerCapture?.(e.pointerId);
+      } catch {}
       b.classList.add('pressed');
-      if (act === 'boost') this.input.touch.boost = true;
-      else if (act === 'smart') {
-        b._t = performance.now();
-        clearTimeout(b._lp);
-        b._lpFired = false;
-        b._lp = setTimeout(() => {
-          b._lpFired = true;
-          this.input.push('releaseAll');
-          navigator.vibrate?.(20);
-        }, LONG_PRESS * 1000);
-      } else this.input.push(act);
+      if (hold) this.input.push(`down:${hold}`);
+      else if (act === 'boost') this.input.touch.boost = true;
+      else this.input.push(act);
     });
     const end = (e) => {
       e.stopPropagation();
+      if (!b.classList.contains('pressed')) return;
       b.classList.remove('pressed');
+      if (hold) this.input.push(`up:${hold}`);
       if (act === 'boost') this.input.touch.boost = false;
-      if (act === 'smart' && b._lp) {
-        clearTimeout(b._lp);
-        b._lp = null;
-        if (!b._lpFired) this.input.push('smartHook');
-      }
     };
     b.addEventListener('pointerup', end);
     b.addEventListener('pointercancel', end);
@@ -123,7 +113,9 @@ export class TouchControls {
     } else {
       this.looks.set(e.pointerId, { x: e.clientX, y: e.clientY });
     }
-    this.root.setPointerCapture?.(e.pointerId);
+    try {
+      this.root.setPointerCapture?.(e.pointerId);
+    } catch {}
   }
 
   _move(e) {

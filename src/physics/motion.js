@@ -3,6 +3,7 @@
 import { Vector3 } from 'three';
 
 const _n = new Vector3();
+let _lastImpact = 0; // 最近一次方塊碰撞損失的法向速度
 
 /**
  * 球體與 AABB 碰撞，把球推出並移除撞向表面的速度分量。
@@ -47,7 +48,11 @@ export function collideSphereAABB(pos, vel, r, box) {
   }
   pos.addScaledVector(_n, pen);
   const vn = vel.dot(_n);
-  if (vn < 0) vel.addScaledVector(_n, -vn);
+  _lastImpact = 0;
+  if (vn < 0) {
+    vel.addScaledVector(_n, -vn);
+    _lastImpact = -vn;
+  }
   return _n;
 }
 
@@ -67,11 +72,12 @@ export function collideSphereSphere(pos, vel, r, center, cr) {
 
 /**
  * 解析所有世界碰撞（地面、建築、城牆）。
- * @returns {{grounded:boolean, hitWall:boolean}}
+ * @returns {{grounded:boolean, hitWall:boolean, wallImpact:number}} wallImpact = 撞牆損失的速度
  */
 export function resolveWorldCollisions(pos, vel, r, colliders, wallRadius) {
   let grounded = false;
   let hitWall = false;
+  let wallImpact = 0;
   // 地面 y=0
   if (pos.y < r) {
     pos.y = r;
@@ -82,7 +88,10 @@ export function resolveWorldCollisions(pos, vel, r, colliders, wallRadius) {
     const n = collideSphereAABB(pos, vel, r, colliders[i]);
     if (n) {
       if (n.y > 0.65) grounded = true;
-      else hitWall = true;
+      else {
+        hitWall = true;
+        if (Math.abs(n.y) < 0.3) wallImpact = Math.max(wallImpact, _lastImpact);
+      }
     }
   }
   // 城牆（圓柱內側）
@@ -99,23 +108,32 @@ export function resolveWorldCollisions(pos, vel, r, colliders, wallRadius) {
     }
     hitWall = true;
   }
-  return { grounded, hitWall };
+  return { grounded, hitWall, wallImpact };
 }
 
 /**
  * 鋼索長度約束：距離超過繩長時把位置投影回球面，並移除向外的徑向速度。
  * 保留切向速度 → 形成擺盪。
- * @returns {boolean} 是否處於繃緊狀態
+ * maxCorrection：單次最多把位置拉回多少；超過的部分由繩子「放長」吸收，
+ * 避免繩子穿過建築或雙索互相拉扯時角色瞬間移動。
+ * @returns {{taut:boolean, length:number}} 共用物件，需立即使用
  */
-export function applyRopeConstraint(pos, vel, anchor, length) {
+const _rope = { taut: false, length: 0 };
+export function applyRopeConstraint(pos, vel, anchor, length, maxCorrection = Infinity) {
   _n.subVectors(pos, anchor);
   const dist = _n.length();
-  if (dist <= length || dist < 1e-6) return false;
+  _rope.taut = false;
+  _rope.length = length;
+  if (dist <= length || dist < 1e-6) return _rope;
   _n.multiplyScalar(1 / dist);
-  pos.copy(anchor).addScaledVector(_n, length);
+  const corr = Math.min(dist - length, maxCorrection);
+  const L = dist - corr;
+  pos.copy(anchor).addScaledVector(_n, L);
   const vr = vel.dot(_n);
   if (vr > 0) vel.addScaledVector(_n, -vr);
-  return true;
+  _rope.taut = true;
+  _rope.length = L;
+  return _rope;
 }
 
 /** 依速度決定子步數，讓每一步位移不超過 maxStep（防止高速穿牆）。 */

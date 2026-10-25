@@ -98,16 +98,45 @@ test('landing fast starts a slide that decays over ~1-2 s', () => {
   assert.ok(t > 0.6 && t < 2.2, `slide duration ${t.toFixed(2)}s`);
 });
 
-test('reeling shortens the rope and pulls the player toward the anchor', () => {
+test('reeling pulls the player toward the anchor smoothly (force, not snapping)', () => {
   const p = new PlayerController(CONFIG);
   p.pos.set(0, 30, 30);
   p.fireHook('left', p.pos.clone(), anchorAt(0, 30, 0));
   for (let i = 0; i < 10; i++) p.update(1 / 60, idle(), world());
   const d0 = p.pos.distanceTo(new Vector3(0, 30, 0));
   const it = { ...idle(), reel: 1, reelStrong: true };
-  for (let i = 0; i < 30; i++) p.update(1 / 60, it, world());
+  let prev = p.pos.clone();
+  for (let i = 0; i < 60; i++) {
+    p.update(1 / 60, it, world());
+    const step = p.pos.distanceTo(prev);
+    assert.ok(step <= p.speed / 60 + 0.4, `no teleport: moved ${step.toFixed(2)}m in one frame`);
+    prev = p.pos.clone();
+  }
   const d1 = p.pos.distanceTo(new Vector3(0, 30, 0));
-  assert.ok(d1 < d0 - 8, `pulled from ${d0.toFixed(1)} to ${d1.toFixed(1)}`);
+  assert.ok(d1 < d0 - 10, `pulled from ${d0.toFixed(1)} to ${d1.toFixed(1)}`);
+});
+
+test('a rope much shorter than the distance does not teleport the player', () => {
+  const p = new PlayerController(CONFIG);
+  p.pos.set(0, 30, 40);
+  p.fireHook('left', p.pos.clone(), anchorAt(0, 40, 0));
+  for (let i = 0; i < 10; i++) p.update(1 / 60, idle(), world());
+  p.hooks.left.length = 5; // 模擬繩子穿過建築轉角等極端情況
+  const before = p.pos.clone();
+  p.update(1 / 60, idle(), world());
+  assert.ok(p.pos.distanceTo(before) < 2, `moved ${p.pos.distanceTo(before).toFixed(2)}m`);
+});
+
+test('boost while hooked accelerates along the swing, not into the wall', () => {
+  const p = new PlayerController(CONFIG);
+  p.pos.set(-20, 40, 0);
+  p.fireHook('left', p.pos.clone(), anchorAt(0, 60, 0));
+  for (let i = 0; i < 10; i++) p.update(1 / 60, idle(), world());
+  p.vel.set(10, -5, 0);
+  const w = { ...world(), camForward: new Vector3(0, 0, -1) };
+  for (let i = 0; i < 30; i++) p.update(1 / 60, { ...idle(), boost: true }, w);
+  assert.ok(Math.abs(p.vel.z) < 3, `boost followed the swing plane, vz=${p.vel.z.toFixed(2)}`);
+  assert.ok(p.speed > 15);
 });
 
 test('world ground and wall collisions', () => {

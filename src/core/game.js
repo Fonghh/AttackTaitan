@@ -59,8 +59,16 @@ export class Game {
     this.touchUI.show(false);
 
     this.spawnYaw = Math.atan2(cfg.player.spawn.x - cfg.titan.start.x, cfg.player.spawn.z - cfg.titan.start.z);
-    this.aims = { left: null, right: null, smart: null };
-    this.smartSide = 'right';
+    this.aims = { left: null, right: null, auto: null };
+    this.autoSide = 'right';
+    // 鋼索模式：single = 單索（按住擺盪，預設）、dual = 左右雙索（進階）
+    this.hookMode = this._load('hookMode2', 'single');
+    this.cameraFollow = this._load('cameraFollow', 'on') === 'on';
+    this.touchUI.setMode(this.hookMode);
+    this.held = { auto: false, left: false, right: false };
+    this.pendingFire = { auto: false, left: false, right: false };
+    this.firedSide = { auto: null, left: 'left', right: 'right' };
+    this.pendingRelease = { left: false, right: false };
     this.strikeEval = { dist: 999, speed: 0, ok: false, inRange: false, fastEnough: false, angleOk: false, lunge: false };
     this.napePos = new THREE.Vector3();
     this.state = 'menu';
@@ -84,7 +92,15 @@ export class Game {
     $('btn-resume').addEventListener('click', () => this.resume());
     for (const b of document.querySelectorAll('[data-restart]')) b.addEventListener('click', () => this.restart(true));
     $('btn-mode').addEventListener('click', () => {
-      this.touchUI.setMode(this.touchUI.mode === 'smart' ? 'dual' : 'smart');
+      this.hookMode = this.hookMode === 'single' ? 'dual' : 'single';
+      this._save('hookMode2', this.hookMode);
+      this.touchUI.setMode(this.hookMode);
+      this._releaseHeld();
+      this._syncModeLabel();
+    });
+    $('btn-follow').addEventListener('click', () => {
+      this.cameraFollow = !this.cameraFollow;
+      this._save('cameraFollow', this.cameraFollow ? 'on' : 'off');
       this._syncModeLabel();
     });
     $('btn-mute').addEventListener('click', () => {
@@ -99,8 +115,28 @@ export class Game {
   }
 
   _syncModeLabel() {
-    const m = this.touchUI.mode;
-    document.getElementById('btn-mode').textContent = m === 'smart' ? '鋼索按鈕：智慧單鉤' : '鋼索按鈕：右側雙鉤';
+    document.getElementById('btn-mode').textContent = this.hookMode === 'single' ? '鋼索：單索（按住擺盪）' : '鋼索：左右雙索（進階）';
+    document.getElementById('btn-follow').textContent = this.cameraFollow ? '鏡頭跟隨飛行方向：開' : '鏡頭跟隨飛行方向：關';
+    document.body.classList.toggle('dual', this.hookMode === 'dual');
+  }
+
+  _load(key, def) {
+    try {
+      return localStorage.getItem(key) || def;
+    } catch {
+      return def;
+    }
+  }
+
+  _save(key, val) {
+    try {
+      localStorage.setItem(key, val);
+    } catch {}
+  }
+
+  _releaseHeld() {
+    for (const k of Object.keys(this.held)) this.held[k] = this.pendingFire[k] = false;
+    this.pendingRelease.left = this.pendingRelease.right = false;
   }
 
   showPanel(id) {
@@ -137,6 +173,7 @@ export class Game {
     this.showPanel('pause');
     this.touchUI.show(false);
     this.pc.releaseAll();
+    this._releaseHeld();
     this.input.touch.boost = false;
     if (document.pointerLockElement) document.exitPointerLock();
   }
@@ -174,13 +211,61 @@ export class Game {
     return this.model.launcherWorld(side, new THREE.Vector3());
   }
 
-  _fire(side, aim) {
-    if (!aim) {
+  /** 按下鋼索鍵：有目標就發射；沒有目標時，按住期間一出現目標就自動發射 */
+  _hookDown(key) {
+    this.held[key] = true;
+    if (!this._tryFire(key)) {
       this.audio.play('miss');
-      this.hud.toast('沒有可勾的目標（超出射程）', 'warn', 0.8);
-      return;
+      this.hud.toast('準星附近沒有可勾的目標（射程 85m）', 'warn', 0.8);
     }
-    this.pc.fireHook(side, this._launcherPos(side), aim);
+  }
+
+  _tryFire(key) {
+    const pc = this.pc;
+    const aim = this.aims[key];
+    if (!aim) {
+      this.pendingFire[key] = true;
+      return false;
+    }
+    const side = key === 'auto' ? this.autoSide : key;
+    if (key === 'auto') {
+      // 單索：同時只有一條，換勾點時直接接到新的
+      const other = side === 'left' ? 'right' : 'left';
+      if (pc.hooks[other].active) pc.hooks[other].release();
+      this.pendingRelease[other] = false;
+    }
+    this.pendingFire[key] = false;
+    this.pendingRelease[side] = false;
+    this.firedSide[key] = side;
+    pc.fireHook(side, this._launcherPos(side), aim);
+    return true;
+  }
+
+  /** 放開鋼索鍵。快速點按時，至少讓鋼索勾住一小段時間（minHold）再放 */
+  _hookUp(key) {
+    this.held[key] = false;
+    this.pendingFire[key] = false;
+    const side = this.firedSide[key];
+    if (!side) return;
+    const h = this.pc.hooks[side];
+    if (!h.active) return;
+    if (h.state === 'flying' || h.attachTime < this.cfg.hook.minHold) this.pendingRelease[side] = true;
+    else this.pc.releaseHook(side);
+  }
+
+  _updateHookHolds() {
+    for (const key of ['auto', 'left', 'right']) {
+      if (this.held[key] && this.pendingFire[key]) this._tryFire(key);
+    }
+    for (const side of ['left', 'right']) {
+      if (!this.pendingRelease[side]) continue;
+      const h = this.pc.hooks[side];
+      if (!h.active) this.pendingRelease[side] = false;
+      else if (h.attached && h.attachTime >= this.cfg.hook.minHold) {
+        this.pendingRelease[side] = false;
+        this.pc.releaseHook(side);
+      }
+    }
   }
 
   _handleEvent(ev) {
@@ -200,32 +285,17 @@ export class Game {
     }
     if (this.state !== 'playing' || pc.hp <= 0) return;
     switch (ev) {
-      case 'fireLeft':
-        this._fire('left', this.aims.left);
-        break;
-      case 'fireRight':
-        this._fire('right', this.aims.right);
-        break;
-      case 'releaseLeft':
-        pc.releaseHook('left');
-        break;
-      case 'releaseRight':
-        pc.releaseHook('right');
-        break;
-      case 'toggleLeft':
-        if (pc.hooks.left.active) pc.releaseHook('left');
-        else this._fire('left', this.aims.left);
-        break;
-      case 'toggleRight':
-        if (pc.hooks.right.active) pc.releaseHook('right');
-        else this._fire('right', this.aims.right);
-        break;
-      case 'smartHook':
-        this._fire(this.smartSide, this.aims.smart);
-        break;
       case 'releaseAll':
+        this._releaseHeld();
         pc.releaseAll();
         break;
+      default:
+        if (ev.startsWith('down:') || ev.startsWith('up:')) {
+          const [kind, k] = ev.split(':');
+          const key = this.hookMode === 'single' ? 'auto' : k === 'auto' ? 'right' : k;
+          if (kind === 'down') this._hookDown(key);
+          else this._hookUp(key);
+        }
       case 'strike':
         this._strike();
         break;
@@ -377,12 +447,13 @@ export class Game {
     }
 
     // 攝影機
-    this.rig.update(dt, pc, { touch: this.touch, joyX: intent.move.x });
+    this.rig.update(dt, pc, { touch: this.touch, joyX: intent.move.x, autoFollow: this.cameraFollow });
     this.model.update(dt, pc, this.rig.yaw);
     this.city.update(pc.pos);
 
     // 鋼索瞄準預測（供下一次發射與 HUD 標記使用）
     this._updateAims();
+    this._updateHookHolds();
 
     // 斬擊條件
     this.strikeEval = this._evaluate();
@@ -408,10 +479,10 @@ export class Game {
       aims: this.aims,
       strikeEval: this.strikeEval,
       napePos: this.napePos,
-      touchMode: this.touch && this.touchUI.mode === 'smart' ? 'smart' : 'dual',
-      smartSide: this.smartSide,
+      touchMode: this.hookMode === 'single' ? 'smart' : 'dual',
+      smartSide: this.autoSide,
     });
-    if (this.touch) this.touchUI.sync(pc);
+    if (this.touch) this.touchUI.sync(pc, !!(this.aims.auto || this.aims.left || this.aims.right));
 
     // 勝負
     if (this.state === 'playing') {
@@ -427,24 +498,20 @@ export class Game {
 
   _updateAims() {
     const H = this.cfg.hook;
-    const assist = this.touch ? H.assistDegTouch : H.assistDegDesktop;
     const f = this.rig.forward;
     const p = this.pc.pos;
-    const useSmart = this.touch && this.touchUI.mode === 'smart';
-    if (useSmart) {
+    if (this.hookMode === 'single') {
       this.aims.left = this.aims.right = null;
-      const a = (this.aims.smart = this.aimer.aim(this.camera, f, p, 0, assist, H.range));
+      const a = (this.aims.auto = this.aimer.aim(this.camera, f, p, 0, H.range, H.swingAim));
       if (a) {
+        // 勾點在左邊就用左發射器，右邊用右發射器
         _right.set(-f.z, 0, f.x).normalize();
-        let side = _v.subVectors(a.point, p).dot(_right) < 0 ? 'left' : 'right';
-        const other = side === 'left' ? 'right' : 'left';
-        if (this.pc.hooks[side].active && !this.pc.hooks[other].active) side = other;
-        this.smartSide = side;
+        this.autoSide = _v.subVectors(a.point, p).dot(_right) < 0 ? 'left' : 'right';
       }
     } else {
-      this.aims.smart = null;
-      this.aims.left = this.aimer.aim(this.camera, f, p, H.aimOffsetDeg, assist, H.range);
-      this.aims.right = this.aimer.aim(this.camera, f, p, -H.aimOffsetDeg, assist, H.range);
+      this.aims.auto = null;
+      this.aims.left = this.aimer.aim(this.camera, f, p, H.aimOffsetDeg, H.range, H.swingAim);
+      this.aims.right = this.aimer.aim(this.camera, f, p, -H.aimOffsetDeg, H.range, H.swingAim);
     }
   }
 

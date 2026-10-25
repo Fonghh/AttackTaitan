@@ -14,6 +14,7 @@ export class CameraRig {
     this.ray = new THREE.Raycaster();
     this.forward = new THREE.Vector3(0, 0, -1);
     this.offset = new THREE.Vector3(0, 2, 6);
+    this.followDir = new THREE.Vector3(0, 0, -1);
     this.reset(0);
   }
 
@@ -26,6 +27,7 @@ export class CameraRig {
     this.lastManualLook = -10;
     this.distSmooth = this.cfg.camera.distance;
     this.time = 0;
+    this.followDir.set(-Math.sin(yaw), 0, -Math.cos(yaw));
   }
 
   addShake(a) {
@@ -49,19 +51,27 @@ export class CameraRig {
     this.time += dt;
     const speed = pc.speed;
 
-    // 手機：放開拖曳一段時間後，空中自動轉向飛行方向；搖桿左右也帶動鏡頭
-    if (opts.touch) {
-      if (Math.abs(opts.joyX) > 0.2 && !pc.grounded) this.yaw -= opts.joyX * C.joystickTurnRate * dt;
-      const hs = Math.hypot(pc.vel.x, pc.vel.z);
-      if (this.time - this.lastManualLook > C.autoFollowDelay && !pc.grounded && hs > 8) {
-        const ty = Math.atan2(-pc.vel.x, -pc.vel.z);
-        let d = ty - this.yaw;
-        d = Math.atan2(Math.sin(d), Math.cos(d));
-        const k = Math.min(1, C.autoFollowRate * dt * Math.min(1.5, hs / 25));
-        this.yaw += d * k;
-        const tp = Math.max(-0.5, Math.min(0.35, Math.atan2(pc.vel.y, hs) * 0.5)) - 0.08;
-        this.pitch += (tp - this.pitch) * k * 0.6;
-      }
+    // 空中自動轉向飛行方向。用平滑過的速度方向，擺盪時鏡頭不會跟著急轉。
+    const hs = Math.hypot(pc.vel.x, pc.vel.z);
+    if (hs > 3) {
+      const k = 1 - Math.exp(-dt / C.followSmoothTime);
+      this.followDir.x += (pc.vel.x / hs - this.followDir.x) * k;
+      this.followDir.z += (pc.vel.z / hs - this.followDir.z) * k;
+    }
+    if (opts.touch && Math.abs(opts.joyX) > 0.5 && !pc.grounded) {
+      this.yaw -= Math.sign(opts.joyX) * (Math.abs(opts.joyX) - 0.5) * 2 * C.joystickTurnRate * dt;
+    }
+    const delay = opts.touch ? C.autoFollowDelayTouch : C.autoFollowDelayMouse;
+    const fl = Math.hypot(this.followDir.x, this.followDir.z);
+    if (opts.autoFollow && this.time - this.lastManualLook > delay && !pc.grounded && hs > 8 && fl > 0.3) {
+      const ty = Math.atan2(-this.followDir.x, -this.followDir.z);
+      let d = ty - this.yaw;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      // 速度越快跟得越緊；快要掉頭（>120°）時放慢，避免鏡頭甩過頭
+      const rate = C.autoFollowRate * Math.min(1.3, hs / 25) * (Math.abs(d) > 2.1 ? 0.4 : 1);
+      const k = Math.min(1, rate * dt);
+      this.yaw += d * k;
+      this.pitch += (C.followPitch - this.pitch) * k * 0.5;
     }
 
     this.updateForward();

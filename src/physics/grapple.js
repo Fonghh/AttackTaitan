@@ -20,7 +20,7 @@ export class Hook {
     this.local = new Vector3(); // 命中點在物件座標系中的位置
     this.length = 0;
     this.taut = false;
-    this.attachedAt = 0;
+    this.attachTime = 0; // 勾住了多久
   }
 
   get attached() {
@@ -72,6 +72,7 @@ export class Hook {
         return false;
       }
       this.state = 'attached';
+      this.attachTime = 0;
       this.length = Math.max(1, dist * initialSlack);
       return true;
     }
@@ -81,61 +82,87 @@ export class Hook {
 }
 
 /**
- * 鋼索瞄準：從攝影機沿準星方向（加左右偏角）射線檢測，命中可勾表面才有效。
- * 打空時在錐形範圍內做輔助瞄準，取最接近中心的有效點。
+ * 鋼索瞄準：從攝影機沿準星方向射線檢測，命中可勾表面才有效。
+ * 擺盪輔助：準星打中的點如果不夠高（或打空），在準星附近扇形搜尋，
+ * 選「離準星近、又比角色高」的勾點 → 勾住後能往下盪、再往上甩。
  */
 export class HookAimer {
   constructor(hookables) {
     this.hookables = hookables;
     this.ray = new Raycaster();
+    this._base = new Vector3();
     this._dir = new Vector3();
-    this._axis = new Vector3();
+    this._right = new Vector3();
     this._hits = [];
   }
 
   /**
    * @param {import('three').Camera} camera
+   * @param {Vector3} forward 準星方向（單位向量）
    * @param {Vector3} playerPos
-   * @param {number} offsetDeg 正值偏左
-   * @param {number} assistDeg
+   * @param {number} centerYawDeg 搜尋中心相對準星的水平偏角（正值偏左）
    * @param {number} range
+   * @param {object} sa 擺盪輔助參數（config.hook.swingAim）
    * @returns {{point:Vector3, object:any, assisted:boolean}|null}
    */
-  aim(camera, forward, playerPos, offsetDeg, assistDeg, range) {
+  aim(camera, forward, playerPos, centerYawDeg, range, sa) {
     const camPos = camera.position;
-    const base = this._dir.copy(forward);
-    if (offsetDeg) {
-      _q.setFromAxisAngle(_up, (offsetDeg * Math.PI) / 180);
+    const base = this._base.copy(forward);
+    if (centerYawDeg) {
+      _q.setFromAxisAngle(_up, (centerYawDeg * Math.PI) / 180);
       base.applyQuaternion(_q).normalize();
     }
-    const skip = Math.max(0, camPos.distanceTo(playerPos) - 1.5);
-    const direct = this._cast(camPos, base, playerPos, skip, range);
-    if (direct) return { ...direct, assisted: false };
-    if (!assistDeg) return null;
+    const near = Math.max(0, camPos.distanceTo(playerPos) - 1.5);
+    const fx = base.x, fz = base.z;
+    const fl = Math.hypot(fx, fz) || 1;
+    // 正對著自己的牆面：勾上去一定會在擺盪最低點撞牆，所以扣分
+    const headOn = (hit) => {
+      const n = hit.normal;
+      if (!n || Math.abs(n.y) > 0.5) return false;
+      const facing = -(n.x * fx + n.z * fz) / fl / Math.hypot(n.x, n.z);
+      const hd = Math.hypot(hit.point.x - playerPos.x, hit.point.z - playerPos.z);
+      return facing > sa.headOnDot && hd < sa.headOnDist;
+    };
+    // 擺盪最低點 = 勾點高度 - 繩長；太低會在半路擦地
+    const clearancePenalty = (hit) => {
+      const clear = hit.point.y - hit.point.distanceTo(playerPos);
+      return clear < sa.minClearance ? Math.min(sa.groundPenalty, (sa.minClearance - clear) * 1.2) : 0;
+    };
+    const direct = this._cast(camPos, base, playerPos, near, range);
+    if (direct && direct.point.y - playerPos.y >= sa.goodHeight && !headOn(direct) && !clearancePenalty(direct)) return { ...direct, assisted: false };
 
-    // 輔助瞄準：兩圈各 8 個方向
-    this._axis.crossVectors(base, _up);
-    if (this._axis.lengthSq() < 1e-6) this._axis.set(1, 0, 0);
-    this._axis.normalize();
-    let best = null;
-    const rings = [assistDeg * 0.5, assistDeg];
-    const d = new Vector3();
-    for (const ang of rings) {
-      for (let k = 0; k < 8; k++) {
-        const rollAngle = (k / 8) * Math.PI * 2;
-        _q.setFromAxisAngle(this._axis, (ang * Math.PI) / 180);
-        d.copy(base).applyQuaternion(_q);
-        _q.setFromAxisAngle(base, rollAngle);
+    const score = (hit, angle) => {
+      const dy = hit.point.y - playerPos.y;
+      return (
+        angle -
+        Math.min(Math.max(dy, 0), sa.maxHeightBonus) * sa.heightWeight +
+        (dy < 2 ? sa.lowPenalty : 0) +
+        (headOn(hit) ? sa.headOnPenalty : 0) +
+        clearancePenalty(hit)
+      );
+    };
+    let best = direct ? { hit: direct, s: score(direct, 0), assisted: false } : null;
+
+    this._right.crossVectors(base, _up);
+    if (this._right.lengthSq() < 1e-6) this._right.set(1, 0, 0);
+    this._right.normalize();
+    for (const pitch of sa.pitchSteps) {
+      for (const yaw of sa.yawSteps) {
+        if (!pitch && !yaw) continue;
+        const angle = Math.hypot(pitch, yaw);
+        if (best && angle - sa.maxHeightBonus * sa.heightWeight >= best.s) continue; // 不可能更好
+        const d = this._dir.copy(base);
+        _q.setFromAxisAngle(this._right, (pitch * Math.PI) / 180);
+        d.applyQuaternion(_q);
+        _q.setFromAxisAngle(_up, (yaw * Math.PI) / 180);
         d.applyQuaternion(_q).normalize();
-        const hit = this._cast(camPos, d, playerPos, skip, range);
-        if (hit) {
-          best = hit;
-          break;
-        }
+        const hit = this._cast(camPos, d, playerPos, near, range);
+        if (!hit) continue;
+        const s = score(hit, angle);
+        if (!best || s < best.s) best = { hit, s, assisted: true };
       }
-      if (best) break;
     }
-    return best ? { ...best, assisted: true } : null;
+    return best ? { ...best.hit, assisted: best.assisted } : null;
   }
 
   _cast(origin, dir, playerPos, near, range) {
@@ -147,7 +174,8 @@ export class HookAimer {
     for (const h of this._hits) {
       if (h.object.userData.noHook) continue;
       if (h.point.distanceTo(playerPos) > range) return null;
-      return { point: h.point.clone(), object: h.object };
+      const normal = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : null;
+      return { point: h.point.clone(), object: h.object, normal };
     }
     return null;
   }

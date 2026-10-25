@@ -169,13 +169,14 @@ export function buildCity(scene, cfg, spawn, lowSpec) {
   const cells = [-175, -125, -75, -25, 25, 75, 125, 175];
   for (const cx of cells) {
     for (const cz of cells) {
-      const isSpawn = cx === spawn.x && cz === spawn.z;
+      // 起點高塔放在 (25,125) 這一格，但往街道中央挪，讓起跳時正對一條開闊街道
+      const isSpawn = cx === 25 && cz === 125;
       if (Math.abs(cx) < 50 && Math.abs(cz) < 50) continue;
       if (Math.hypot(cx, cz) > cfg.wallRadius - 30) continue;
       const ring = Math.abs(cx) <= 75 && Math.abs(cz) <= 75; // 廣場周圍一圈一定有建築
       if (!isSpawn && !ring && rnd() < 0.15) continue;
       if (isSpawn) {
-        addBuilding(cx, cz, 16, 16, 44, true);
+        addBuilding(spawn.x, spawn.z, 14, 14, 44, true);
         continue;
       }
       const nearPlaza = Math.hypot(cx, cz) < 110;

@@ -235,6 +235,7 @@ body {
 #crosshair i {
   position: absolute;
   background: rgba(255, 255, 255, 0.9);
+  transition: background 0.1s;
   box-shadow: 0 0 2px #000;
 }
 #crosshair i:nth-child(1),
@@ -260,6 +261,10 @@ body {
 }
 #crosshair i:nth-child(4) {
   right: 0;
+}
+
+#crosshair.no-target i {
+  background: rgba(255, 90, 79, 0.85);
 }
 
 /* 鋼索落點預測 */
@@ -673,6 +678,15 @@ body {
   height: 88px;
   font-size: 16px;
 }
+.t-hook small {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+.t-hook.no-target {
+  opacity: 0.55;
+}
 .t-hookL,
 .t-hookR {
   bottom: calc(27% + env(safe-area-inset-bottom));
@@ -688,18 +702,6 @@ body {
 .t-hookR.on {
   border-color: var(--rope-r);
   box-shadow: 0 0 12px var(--rope-r);
-}
-.t-release {
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: calc(12px + env(safe-area-inset-bottom));
-  width: 72px;
-  height: 36px;
-  border-radius: 18px;
-  font-size: 13px;
-}
-.t-release.pressed {
-  transform: translateX(-50%) scale(0.92);
 }
 .t-strike {
   right: 30px;

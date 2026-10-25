@@ -127,6 +127,7 @@ export class PlayerController {
       if (h.updateFlight(dt, origin, cfg.hook.travelSpeed, cfg.hook.initialSlack, cfg.hook.range)) {
         this.emit('hookAttach', { side, point: h.target.clone() });
       }
+      if (h.attached) h.attachTime += dt;
     }
 
     // 輸入方向（以攝影機 yaw 為基準的水平方向）
@@ -136,7 +137,7 @@ export class PlayerController {
     if (_wish.lengthSq() > 1) _wish.normalize();
 
     const attached = this.anyAttached;
-    this.reeling = attached ? intent.reel : 0;
+    this.reeling = attached ? intent.reel : 0; // 只有 Space（電腦）會捲收
 
     // 加速（消耗氣體）
     this.boosting = false;
@@ -210,7 +211,11 @@ export class PlayerController {
           if (airThrust) this.vel.y += P.airThrust * h;
         }
 
-        if (this.boosting) {
+        // 鋼索的力：捲收（朝勾點的推力）、擺盪推力、勾住時加速沿擺盪方向
+        let swingBoosted = false;
+        if (attached) swingBoosted = this._ropeForces(h, world);
+
+        if (this.boosting && !swingBoosted) {
           // 沿視角方向推進（地面時偏水平）
           _tmp.copy(world.camForward);
           if (this.grounded) _tmp.y = Math.max(_tmp.y, 0.15);
@@ -232,9 +237,14 @@ export class PlayerController {
             const hk = this.hooks[side];
             if (!hk.attached) continue;
             hk.anchor(_anchor);
-            const dist = this.pos.distanceTo(_anchor);
-            if (it === 0) this._updateRopeLength(hk, dist, h, intent);
-            hk.taut = applyRopeConstraint(this.pos, this.vel, _anchor, hk.length);
+            if (it === 0 && this.reeling > 0) {
+              // 捲收時繩長跟著實際距離縮短（不會反過來把角色硬拉過去）
+              const dist = this.pos.distanceTo(_anchor);
+              hk.length = Math.max(cfg.hook.minLength, Math.min(hk.length, dist));
+            }
+            const r = applyRopeConstraint(this.pos, this.vel, _anchor, hk.length, cfg.hook.maxCorrection);
+            hk.taut = r.taut;
+            hk.length = r.length;
           }
         }
       }
@@ -244,6 +254,11 @@ export class PlayerController {
         for (const sp of world.titanSpheres) {
           if (collideSphereSphere(this.pos, this.vel, P.radius, sp.center, sp.r)) hitWall = true;
         }
+      }
+      // 勾住時撞牆：把撞擊速度轉成沿牆往上衝（像跑上牆面），放索後就能翻上屋頂
+      if (attached && !this.lunge && res.wallImpact > 4) {
+        this.vel.y = Math.max(this.vel.y, 0) + res.wallImpact * cfg.hook.wallRunUp;
+        this.emit('wallRun', { speed: res.wallImpact });
       }
       grounded = grounded || res.grounded;
       hitWall = hitWall || res.hitWall;
@@ -269,24 +284,36 @@ export class PlayerController {
     if (hitWall) this.emit('bump', {});
   }
 
-  _updateRopeLength(hk, dist, h, intent) {
+  /**
+   * 勾住時的額外力量。回傳 true 表示加速已沿擺盪方向套用。
+   */
+  _ropeForces(h, world) {
     const H = this.cfg.hook;
-    // 繩子不會比實際距離長太多（保持接近繃緊）
-    hk.length = Math.min(hk.length, dist + H.maxSlack);
-    let reelSpeed = H.autoReel;
-    let reelAccel = 0;
-    if (intent.reel > 0) {
-      // k: 0 = 弱捲收（W／搖桿輕推），1 = 強捲收（Space／搖桿推到底）
-      const k = intent.reelStrong ? 1 : Math.min(1, intent.reel);
-      reelSpeed = Math.max(reelSpeed, H.weakReelSpeed + (H.reelSpeed - H.weakReelSpeed) * k);
-      reelAccel = H.weakReelAccel + (H.reelAccel - H.weakReelAccel) * k;
-    }
-    hk.length = Math.max(H.minLength, hk.length - reelSpeed * h);
-    if (reelAccel > 0 && dist > H.minLength) {
+    let boosted = false;
+    for (const side of ['left', 'right']) {
+      const hk = this.hooks[side];
+      if (!hk.attached) continue;
       hk.anchor(_anchor);
-      _anchor.sub(this.pos).multiplyScalar(1 / dist);
-      this.vel.addScaledVector(_anchor, reelAccel * h);
+      _anchor.sub(this.pos);
+      const dist = _anchor.length();
+      if (dist < 1e-3) continue;
+      _anchor.multiplyScalar(1 / dist); // 指向勾點的單位向量
+      if (this.reeling > 0 && dist > H.minLength) {
+        this.vel.addScaledVector(_anchor, H.reelAccel * this.reeling * h);
+      }
+      // 切線方向：速度扣掉沿繩方向的分量
+      _tmp.copy(this.vel).addScaledVector(_anchor, -this.vel.dot(_anchor));
+      const ts = _tmp.length();
+      if (ts > 2) {
+        _tmp.multiplyScalar(1 / ts);
+        if (hk.taut) this.vel.addScaledVector(_tmp, H.swingPump * h);
+        if (this.boosting && !boosted) {
+          this.vel.addScaledVector(_tmp, this.cfg.boost.accel * H.boostSwing * h);
+          boosted = true;
+        }
+      }
     }
+    return boosted;
   }
 
   _groundMove(h, intent) {
