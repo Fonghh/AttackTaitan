@@ -136,6 +136,10 @@ export class Hud {
 
     // 準星：附近沒有可勾目標時變紅
     e.crosshair.classList.toggle('no-target', !(aims.auto || aims.left || aims.right));
+    // 準星位置（手機準心搖桿）
+    const rt = s.reticle || { x: 0, y: 0 };
+    e.crosshair.style.left = `${(rt.x * 0.5 + 0.5) * 100}%`;
+    e.crosshair.style.top = `${(-rt.y * 0.5 + 0.5) * 100}%`;
 
     // 弱點提示
     if (titan.alive) {

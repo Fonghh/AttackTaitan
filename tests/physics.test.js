@@ -187,7 +187,7 @@ test('pull style: pulls toward the anchor, stops pulling on arrival but keeps th
     if (p.events.some((e) => e.type === 'arrive')) arrived = true;
     p.events.length = 0;
   }
-  assert.ok(maxSpeed > 28 && maxSpeed < 60, `pull speed ${maxSpeed.toFixed(1)} m/s`);
+  assert.ok(maxSpeed > 35 && maxSpeed < 75, `pull speed ${maxSpeed.toFixed(1)} m/s`);
   assert.ok(arrived, 'reached the anchor');
   assert.ok(p.hooks.right.attached, 'rope is NOT released automatically');
 });

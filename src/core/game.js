@@ -18,6 +18,7 @@ const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
+const _aimDir = new THREE.Vector3();
 
 export class Game {
   constructor(container) {
@@ -62,10 +63,13 @@ export class Game {
     this.spawnYaw = Math.atan2(cfg.player.spawn.x - cfg.titan.start.x, cfg.player.spawn.z - cfg.titan.start.z);
     this.aims = { left: null, right: null, auto: null };
     this.autoSide = 'right';
+    this.reticle = { x: 0, y: 0 }; // 準心在畫面上的位置（NDC，-1..1）
     // 鋼索模式：single = 單索（按住擺盪，預設）、dual = 左右雙索（進階）
     this.hookMode = this._load('hookMode2', 'single');
     this.cameraFollow = this._load('cameraFollow2', cfg.camera.autoFollow ? 'on' : 'off') === 'on';
     this.pc.ropeStyle = this._load('ropeStyle', cfg.hook.style);
+    this.hookFollow = this._load('hookFollow', cfg.camera.hookFollow ? 'on' : 'off') === 'on';
+    this.pc.speedScale = Math.max(0.5, Math.min(1.5, Number(this._load('speedScale', '1')) || 1));
     this.touchUI.setMode(this.hookMode);
 
     this.strikeEval = { dist: 999, speed: 0, ok: false, inRange: false, fastEnough: false, angleOk: false, lunge: false };
@@ -104,6 +108,18 @@ export class Game {
       this._save('ropeStyle', this.pc.ropeStyle);
       this._syncModeLabel();
     });
+    $('btn-hookfollow').addEventListener('click', () => {
+      this.hookFollow = !this.hookFollow;
+      this._save('hookFollow', this.hookFollow ? 'on' : 'off');
+      this._syncModeLabel();
+    });
+    const setSpeed = (d) => {
+      this.pc.speedScale = Math.round(Math.max(0.5, Math.min(1.5, this.pc.speedScale + d)) * 10) / 10;
+      this._save('speedScale', String(this.pc.speedScale));
+      this._syncModeLabel();
+    };
+    $('spd-down').addEventListener('click', () => setSpeed(-0.1));
+    $('spd-up').addEventListener('click', () => setSpeed(0.1));
     $('btn-follow').addEventListener('click', () => {
       this.cameraFollow = !this.cameraFollow;
       this._save('cameraFollow2', this.cameraFollow ? 'on' : 'off');
@@ -123,6 +139,8 @@ export class Game {
   _syncModeLabel() {
     document.getElementById('btn-mode').textContent = this.hookMode === 'single' ? '鋼索：單索（按住擺盪）' : '鋼索：左右雙索（進階）';
     document.getElementById('btn-style').textContent = this.pc.ropeStyle === 'pull' ? '鋼索手感：拉索（勾住被拉過去）' : '鋼索手感：擺盪（鐘擺）';
+    document.getElementById('btn-hookfollow').textContent = this.hookFollow ? '鉤住時鏡頭跟隨人物：開' : '鉤住時鏡頭跟隨人物：關';
+    document.getElementById('spd-val').textContent = `速度 ${Math.round(this.pc.speedScale * 100)}%`;
     document.getElementById('btn-follow').textContent = this.cameraFollow ? '鏡頭跟隨飛行方向：開' : '鏡頭跟隨飛行方向：關';
     document.body.classList.toggle('dual', this.hookMode === 'dual');
   }
@@ -242,6 +260,23 @@ export class Game {
     pc.fireHook(side, this._launcherPos(side), aim);
   }
 
+  /** 準心搖桿放開：朝準心發射；已勾住時直接換到新的勾點 */
+  _hookAimFire(key) {
+    const pc = this.pc;
+    const aim = this.aims[key];
+    if (!aim) {
+      this.audio.play('miss');
+      this.hud.toast('準心上沒有可勾的目標（射程 85m）', 'warn', 0.8);
+      return;
+    }
+    const side = key === 'auto' ? this.autoSide : key;
+    if (key === 'auto') {
+      const other = side === 'left' ? 'right' : 'left';
+      if (pc.hooks[other].active) pc.hooks[other].release(); // 換勾點：舊的直接收回，不觸發放索加成
+    }
+    pc.fireHook(side, this._launcherPos(side), aim);
+  }
+
   _handleEvent(ev) {
     const pc = this.pc;
     if (ev === 'pause' || ev === 'lockLost') {
@@ -257,6 +292,10 @@ export class Game {
       document.getElementById('help').classList.toggle('open');
       return;
     }
+    if (ev === 'reticleReset') {
+      this.input.touch.aimX = this.input.touch.aimY = 0;
+      return;
+    }
     if (this.state !== 'playing' || pc.hp <= 0) return;
     switch (ev) {
       case 'releaseAll':
@@ -264,10 +303,11 @@ export class Game {
         pc.releaseAll();
         break;
       default:
-        if (ev.startsWith('down:') || ev.startsWith('up:')) {
+        if (ev.startsWith('down:') || ev.startsWith('up:') || ev.startsWith('aim:')) {
           const [kind, k] = ev.split(':');
           const key = this.hookMode === 'single' ? 'auto' : k === 'auto' ? 'right' : k;
           if (kind === 'down') this._hookToggle(key); // 放開按鍵不做事（按一下勾、再按一下放）
+          else if (kind === 'aim') this._hookAimFire(key); // 準心搖桿拖曳後放開：朝準心發射
         }
         break;
       case 'strike':
@@ -421,7 +461,23 @@ export class Game {
     }
 
     // 攝影機
-    this.rig.update(dt, pc, { touch: this.touch, joyX: intent.move.x, autoFollow: this.cameraFollow });
+    // 手機：鉤住時（與放索後一小段）鏡頭轉向人物面朝的方向
+    if (pc.anyAttached) this.sinceHooked = 0;
+    else this.sinceHooked = (this.sinceHooked ?? 99) + dt;
+    const C = this.cfg.camera;
+    const hookFollow = this.touch && this.hookFollow && this.sinceHooked < C.hookFollowAfter && Math.hypot(pc.vel.x, pc.vel.z) > 4;
+    // 準心推到畫面邊緣時，鏡頭慢慢跟著轉
+    const t = this.input.touch;
+    const R = this.cfg.reticle;
+    if (this.touch && (Math.abs(t.aimX) > 0.85 || Math.abs(t.aimY) > 0.85)) this.rig.lastManualLook = this.rig.time;
+    if (this.touch && Math.abs(t.aimX) > 0.85) this.rig.yaw -= Math.sign(t.aimX) * ((Math.abs(t.aimX) - 0.85) / 0.15) * R.edgeTurnRate * dt;
+    if (this.touch && Math.abs(t.aimY) > 0.85) this.rig.pitch = Math.max(-1.35, Math.min(1.25, this.rig.pitch + Math.sign(t.aimY) * ((Math.abs(t.aimY) - 0.85) / 0.15) * R.edgeTurnRate * 0.6 * dt));
+    this.rig.update(dt, pc, {
+      touch: this.touch,
+      joyX: intent.move.x,
+      autoFollow: this.cameraFollow,
+      followYaw: hookFollow ? this.model.yaw : null,
+    });
     this.model.update(dt, pc, this.rig.yaw);
     this.city.update(pc.pos);
 
@@ -454,6 +510,7 @@ export class Game {
       napePos: this.napePos,
       touchMode: this.hookMode === 'single' ? 'smart' : 'dual',
       smartSide: this.autoSide,
+      reticle: this.reticle,
     });
     if (this.touch) this.touchUI.sync(pc, !!(this.aims.auto || this.aims.left || this.aims.right));
 
@@ -471,7 +528,15 @@ export class Game {
 
   _updateAims() {
     const H = this.cfg.hook;
-    const f = this.rig.forward;
+    // 準心位置（手機準心搖桿可以把準心移離畫面中央）
+    const R = this.cfg.reticle;
+    this.reticle.x = this.touch ? this.input.touch.aimX * R.rangeX : 0;
+    this.reticle.y = this.touch ? this.input.touch.aimY * R.rangeY : 0;
+    let f = this.rig.forward;
+    if (this.reticle.x || this.reticle.y) {
+      this.camera.updateMatrixWorld();
+      f = _aimDir.set(this.reticle.x, this.reticle.y, 0.5).unproject(this.camera).sub(this.camera.position).normalize();
+    }
     const p = this.pc.pos;
     // 拉索：準星指哪勾哪（小範圍輔助）；擺盪：擺盪輔助瞄準
     const assist = this.touch ? H.pull.aimAssistDegTouch : H.pull.aimAssistDeg;

@@ -24,6 +24,7 @@ export class PlayerController {
     this.hooks = { left: new Hook('left'), right: new Hook('right') };
     this.events = []; // 給音效／特效用的事件
     this.ropeStyle = cfg.hook.style;
+    this.speedScale = 1; // 速度倍率（暫停選單調整）：影響拉索、加速與最高速度
     this.reset();
   }
 
@@ -255,7 +256,7 @@ export class PlayerController {
           _tmp.copy(world.camForward);
           if (this.grounded) _tmp.y = Math.max(_tmp.y, 0.15);
           _tmp.normalize();
-          this.vel.addScaledVector(_tmp, cfg.boost.accel * h);
+          this.vel.addScaledVector(_tmp, cfg.boost.accel * this.speedScale * h);
         }
 
         // 空氣阻力
@@ -345,7 +346,7 @@ export class PlayerController {
       }
     }
 
-    softLimitSpeed(this.vel, P.maxSpeed, P.softLimitRate, dt);
+    softLimitSpeed(this.vel, P.maxSpeed * this.speedScale, P.softLimitRate, dt);
     this.maxSpeed = Math.max(this.maxSpeed, this.speed);
     if (hitWall) this.emit('bump', {});
   }
@@ -367,8 +368,8 @@ export class PlayerController {
       if (this.pulling && hk.pullOn) {
         // 拉索：朝勾點加速到 maxSpeed，切線速度保留 → 帶著原本的慣性畫出弧線
         const along = this.vel.dot(_anchor);
-        const room = H.pull.maxSpeed - along;
-        if (room > 0) this.vel.addScaledVector(_anchor, Math.min(H.pull.accel * h, room));
+        const room = H.pull.maxSpeed * this.speedScale - along;
+        if (room > 0) this.vel.addScaledVector(_anchor, Math.min(H.pull.accel * this.speedScale * h, room));
         // 側向速度慢慢收斂，路線最後會對準勾點（但保留一段弧線）
         _tmp.copy(this.vel).addScaledVector(_anchor, -this.vel.dot(_anchor));
         this.vel.addScaledVector(_tmp, -Math.min(1, H.pull.sideDamp * h));
@@ -384,7 +385,7 @@ export class PlayerController {
         _tmp.multiplyScalar(1 / ts);
         if (hk.taut) this.vel.addScaledVector(_tmp, H.swingPump * h);
         if (this.boosting && !boosted) {
-          this.vel.addScaledVector(_tmp, this.cfg.boost.accel * H.boostSwing * h);
+          this.vel.addScaledVector(_tmp, this.cfg.boost.accel * this.speedScale * H.boostSwing * h);
           boosted = true;
         }
       }

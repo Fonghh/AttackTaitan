@@ -61,6 +61,14 @@ export class CameraRig {
     if (opts.touch && Math.abs(opts.joyX) > 0.5 && !pc.grounded) {
       this.yaw -= Math.sign(opts.joyX) * (Math.abs(opts.joyX) - 0.5) * 2 * C.joystickTurnRate * dt;
     }
+    // 鉤住時跟隨人物面朝方向（手動拖曳轉視角後 0.5 秒內不干擾）
+    if (opts.followYaw != null && this.time - this.lastManualLook > 0.5) {
+      let d = opts.followYaw - this.yaw;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      const k = Math.min(1, C.hookFollowRate * dt);
+      this.yaw += d * k;
+      this.pitch += (C.followPitch - this.pitch) * k * 0.3;
+    }
     const delay = opts.touch ? C.autoFollowDelayTouch : C.autoFollowDelayMouse;
     const fl = Math.hypot(this.followDir.x, this.followDir.z);
     if (opts.autoFollow && this.time - this.lastManualLook > delay && !pc.grounded && hs > 8 && fl > 0.3) {

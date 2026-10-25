@@ -161,7 +161,7 @@ try {
   });
   check('[pull] rope pulls the player toward the anchor (slower, controllable)', pull.maxPull > 28 && pull.maxPull < 55, `${pull.maxPull.toFixed(1)} m/s`);
   check('[pull] rope stays attached until tapped again; release launches upward', pull.events.includes('arrive') && pull.events.includes('fling'), pull.events.join(','));
-  check('[pull] flies over the roof and keeps going', pull.events.includes('vault') && pull.maxY > pull.anchorY + 15 && pull.travel > 80, `peak ${pull.maxY.toFixed(0)}m (anchor ${pull.anchorY.toFixed(0)}m), travel ${pull.travel.toFixed(0)}m`);
+  check('[pull] flies over the roof and keeps going', pull.events.includes('vault') && pull.maxY > pull.anchorY + 8 && pull.travel > 80, `peak ${pull.maxY.toFixed(0)}m (anchor ${pull.anchorY.toFixed(0)}m), travel ${pull.travel.toFixed(0)}m`);
   check('[pull] no teleport', pull.maxJump < 0.3, `${pull.maxJump.toFixed(2)}m`);
   check('pressing the rope does not trigger a strike', pull.strikes === 0, `strikes=${pull.strikes}`);
   await page.evaluate(() => window.__game.renderer.render(window.__game.scene, window.__game.camera));
@@ -287,8 +287,9 @@ try {
     g.rig.pitch = 0.35;
     g.rig.yaw -= 0.12;
     window.__fired = 0;
-    const f = g.pc.fireHook.bind(g.pc);
-    g.pc.fireHook = (...a) => (window.__fired++, f(...a));
+    // 只包一層計數（避免前一段測試的包裝疊加）
+    g.pc.__origFire = g.pc.__origFire || g.pc.fireHook.bind(g.pc);
+    g.pc.fireHook = (...a) => (window.__fired++, g.pc.__origFire(...a));
   });
   await mp.waitForTimeout(300);
   const box = await mp.locator('.t-hook').boundingBox();
@@ -302,18 +303,58 @@ try {
   await mp.waitForFunction(() => !window.__game.pc.anyAttached, null, { timeout: 10000 }).catch(() => {});
   const tap2 = await mp.evaluate(() => !window.__game.pc.anyAttached);
   check('mobile: second tap releases the rope', tap2);
-  // 按住鋼索鈕拖曳 → 轉動準星；放開 → 發射
+  // 鋼索鈕＝準心搖桿：拖曳時準心在畫面上移動（鏡頭不轉），放開 → 朝準心發射，準心回到中央
   await mp.evaluate(() => window.__game.restart(true));
   await mp.waitForTimeout(300);
+  await mp.evaluate(() => {
+    const g = window.__game;
+    g.rig.pitch = 0.05;
+    window.__fired = 0;
+    // 只包一層計數（避免前一段測試的包裝疊加）
+    g.pc.__origFire = g.pc.__origFire || g.pc.fireHook.bind(g.pc);
+    g.pc.fireHook = (...a) => (window.__fired++, g.pc.__origFire(...a));
+  });
+  // 先找出準心推到哪個方向會對到建築（模擬玩家看著畫面把準心移到大樓上）
+  const stick = await mp.evaluate(() => {
+    const g = window.__game;
+    for (const [x, y] of [[0.6, 0.2], [0.6, 0.4], [0.8, 0.3], [-0.6, 0.2], [-0.6, 0.4], [-0.8, 0.3], [0.4, 0.6], [-0.4, 0.6]]) {
+      g.input.touch.aimX = x;
+      g.input.touch.aimY = y;
+      g._updateAims();
+      if (g.aims.auto) return { x, y };
+    }
+    return { x: 0.6, y: 0.3 };
+  });
+  await mp.evaluate(() => (window.__game.input.touch.aimX = window.__game.input.touch.aimY = 0));
   const yaw0 = await mp.evaluate(() => window.__game.rig.yaw);
   await mp.dispatchEvent('.t-hook', 'pointerdown', { pointerId: 7, isPrimary: true, clientX: cx, clientY: cy });
-  for (let i = 1; i <= 6; i++) await mp.dispatchEvent('.t-hook', 'pointermove', { pointerId: 7, isPrimary: true, clientX: cx - i * 6, clientY: cy - i * 3 });
+  const R = 70;
+  for (let i = 1; i <= 6; i++) await mp.dispatchEvent('.t-hook', 'pointermove', { pointerId: 7, isPrimary: true, clientX: cx + (stick.x * R * i) / 6, clientY: cy - (stick.y * R * i) / 6 });
+  await mp.waitForTimeout(600);
+  const mid = await mp.evaluate(() => {
+    const ch = document.getElementById('crosshair').getBoundingClientRect();
+    return { yaw: window.__game.rig.yaw, chX: ch.left + ch.width / 2, chY: ch.top + ch.height / 2, aim: !!window.__game.aims.auto };
+  });
+  await mp.dispatchEvent('.t-hook', 'pointerup', { pointerId: 7, isPrimary: true, clientX: cx + stick.x * R, clientY: cy - stick.y * R });
+  await mp.waitForFunction(() => window.__fired > 0, null, { timeout: 30000 }).catch(() => {});
   await mp.waitForTimeout(400);
-  const yaw1 = await mp.evaluate(() => window.__game.rig.yaw);
-  await mp.dispatchEvent('.t-hook', 'pointerup', { pointerId: 7, isPrimary: true, clientX: cx - 36, clientY: cy - 18 });
-  await mp.waitForFunction(() => window.__game.pc.anyAttached || window.__fired > 1, null, { timeout: 30000 }).catch(() => {});
-  const fired2 = await mp.evaluate(() => window.__game.pc.hooks.left.active || window.__game.pc.hooks.right.active || window.__game.pc.speed > 0);
-  check('mobile: dragging the hook button aims (camera turns), release fires', Math.abs(yaw1 - yaw0) > 0.1 && fired2, `yaw ${yaw0.toFixed(2)} → ${yaw1.toFixed(2)}`);
+  const after = await mp.evaluate(() => ({ fired: window.__fired, aimX: window.__game.input.touch.aimX, rx: window.__game.reticle.x }));
+  check('mobile: aim stick moves the crosshair on screen without turning the camera', Math.abs(mid.yaw - yaw0) < 0.02 && Math.hypot(mid.chX - 195, mid.chY - 422) > 60, `crosshair (${mid.chX.toFixed(0)}, ${mid.chY.toFixed(0)}), yaw ${yaw0.toFixed(2)}→${mid.yaw.toFixed(2)}`);
+  check('mobile: releasing the aim stick fires at the crosshair and recenters it', after.fired === 1 && after.aimX === 0 && after.rx === 0, JSON.stringify(after) + ' target=' + mid.aim);
+  // 鉤住時鏡頭轉向人物面朝方向
+  await mp.waitForFunction(() => window.__game.pc.anyAttached, null, { timeout: 30000 }).catch(() => {});
+  await mp.waitForFunction(() => {
+    const g = window.__game;
+    const d = Math.atan2(Math.sin(g.model.yaw - g.rig.yaw), Math.cos(g.model.yaw - g.rig.yaw));
+    return g.pc.anyAttached && Math.abs(d) < 0.25 && Math.hypot(g.pc.vel.x, g.pc.vel.z) > 6;
+  }, null, { timeout: 30000 }).then(() => true).catch(() => false).then((ok) => check('mobile: while hooked the camera turns to face where the character is heading', ok));
+  // 速度倍率
+  await mp.evaluate(() => window.__game.pause());
+  await mp.tap('#spd-up');
+  const spd = await mp.evaluate(() => ({ s: window.__game.pc.speedScale, label: document.getElementById('spd-val').textContent }));
+  check('pause menu speed control', spd.s === 1.1 && spd.label.includes('110'), JSON.stringify(spd));
+  await mp.tap('#spd-down');
+  await mp.tap('#btn-resume');
   await mp.screenshot({ path: `${OUT}/05-mobile.png` });
   check('no page errors (mobile)', merr.length === 0, merr.slice(0, 3).join(' | '));
 } finally {

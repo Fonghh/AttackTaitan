@@ -1,6 +1,6 @@
 // 手機觸控操作：左下動態搖桿、右側按鈕、空白處拖曳轉視角。
-// 鋼索按鈕（像射擊遊戲的開火鍵）：按住拖曳＝調整準星方向；
-//   沒勾住時，放開手指＝發射；已勾住時，點一下＝放開鋼索（拖曳只會轉視角）。
+// 鋼索按鈕＝準心搖桿：按住拖曳時準心在畫面上移動（鏡頭不轉），放開＝朝準心發射
+//   （已勾住時會直接換到新勾點）；點一下＝沒勾住時朝畫面中央發射、已勾住時放索。
 // 'single'（單索，預設）／'dual'（左右雙鉤）。
 
 const TAP_MOVE = 14; // 手指移動小於此距離（px）視為點一下
@@ -19,13 +19,16 @@ export class TouchControls {
       <div class="joy-base" hidden><div class="joy-knob"></div></div>
       <button class="tbtn t-pause" data-act="pause" aria-label="暫停">II</button>
       <button class="tbtn t-boost" data-act="boost">加速</button>
+      <div class="aim-stick" hidden><div class="aim-knob"></div></div>
       <button class="tbtn t-hook" data-hold="auto"><span>鋼索</span><small>拖曳瞄準</small></button>
       <button class="tbtn t-hookL" data-hold="left">左鉤</button>
       <button class="tbtn t-hookR" data-hold="right">右鉤</button>
       <button class="tbtn t-strike" data-act="strike">斬擊</button>
-      <div class="t-hint">左下＝移動。按住「鋼索」拖曳瞄準、放開發射；勾住後點一下放開</div>`;
+      <div class="t-hint">左下＝移動。按住「鋼索」拖曳移動準心、放開發射；勾住後點一下放索</div>`;
     this.base = root.querySelector('.joy-base');
     this.knob = root.querySelector('.joy-knob');
+    this.aimStick = root.querySelector('.aim-stick');
+    this.aimKnob = root.querySelector('.aim-knob');
     this.btn = {
       boost: root.querySelector('.t-boost'),
       auto: root.querySelector('.t-hook'),
@@ -77,7 +80,7 @@ export class TouchControls {
     this.hookActive.right = r;
     const label = this.btn.auto.firstElementChild;
     const sub = this.btn.auto.lastElementChild;
-    const t = l || r ? ['放索', '點一下'] : ['鋼索', '拖曳瞄準'];
+    const t = l || r ? ['放索', '點一下／拖曳換勾'] : ['鋼索', '拖曳瞄準'];
     if (label.textContent !== t[0]) {
       label.textContent = t[0];
       sub.textContent = t[1];
@@ -92,11 +95,19 @@ export class TouchControls {
 
   cancelAim() {
     for (const b of Object.values(this.btn)) b._drag = null;
+    this._setReticle(0, 0);
+    this.aimStick.hidden = true;
+  }
+
+  _setReticle(x, y) {
+    this.input.touch.aimX = x;
+    this.input.touch.aimY = y;
   }
 
   _bindButton(b) {
     const act = b.dataset.act;
     const hold = b.dataset.hold;
+    const R = this.cfg.reticle.stickRadius;
     b.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -105,7 +116,11 @@ export class TouchControls {
       } catch {}
       b.classList.add('pressed');
       if (hold) {
-        b._drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, wasActive: this.hookActive[hold] };
+        b._drag = { id: e.pointerId, ox: e.clientX, oy: e.clientY, moved: 0, t: performance.now() };
+        this.aimStick.hidden = false;
+        this.aimStick.style.left = `${e.clientX}px`;
+        this.aimStick.style.top = `${e.clientY}px`;
+        this.aimKnob.style.transform = 'translate(-50%, -50%)';
       } else if (act === 'boost') this.input.touch.boost = true;
       else this.input.push(act);
     });
@@ -114,12 +129,16 @@ export class TouchControls {
         const d = b._drag;
         if (!d || e.pointerId !== d.id) return;
         e.stopPropagation();
-        const dx = e.clientX - d.x, dy = e.clientY - d.y;
-        d.moved += Math.abs(dx) + Math.abs(dy);
-        const s = this.cfg.sensitivity.touch;
-        this.input.addLook(dx * s, dy * s);
-        d.x = e.clientX;
-        d.y = e.clientY;
+        let dx = e.clientX - d.ox, dy = e.clientY - d.oy;
+        d.moved = Math.max(d.moved, Math.hypot(dx, dy));
+        const l = Math.hypot(dx, dy);
+        if (l > R) {
+          dx = (dx / l) * R;
+          dy = (dy / l) * R;
+        }
+        this.aimKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+        // 類比搖桿：推多遠，準心就離畫面中央多遠
+        this._setReticle(dx / R, -dy / R);
       });
     }
     const end = (e, cancelled) => {
@@ -129,9 +148,15 @@ export class TouchControls {
       if (act === 'boost') this.input.touch.boost = false;
       const d = b._drag;
       b._drag = null;
-      if (!hold || !d || cancelled) return;
-      // 沒勾住：放開＝發射（拖曳瞄準後也會發射）；已勾住：只有「點一下」才放開
-      if (!d.wasActive || d.moved < TAP_MOVE) this.input.push(`down:${hold}`);
+      if (!hold || !d) return;
+      this.aimStick.hidden = true;
+      if (!cancelled) {
+        const tap = d.moved < TAP_MOVE;
+        // 點一下：切換（沒勾住→發射、勾住→放索）；拖曳後放開：朝準心發射（勾住時換勾點）
+        this.input.push(tap ? `down:${hold}` : `aim:${hold}`);
+      }
+      // 準心在遊戲處理完這次發射後才回到中央（見 Game）
+      this.input.push('reticleReset');
     };
     b.addEventListener('pointerup', (e) => end(e, false));
     b.addEventListener('pointercancel', (e) => end(e, true));

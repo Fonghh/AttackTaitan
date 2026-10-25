@@ -10,7 +10,7 @@ export const CONFIG = {
     jumpSpeed: 9,
     airAccel: 14, // 空中 WASD 轉向加速度
     airThrust: 16, // 空中未勾索時按 Space 的上升噴氣
-    maxSpeed: 55,
+    maxSpeed: 68,
     softLimitRate: 3, // 超過最高速時，每秒衰減多少比例
     dragCoef: 0.00012,
     maxHp: 100,
@@ -31,8 +31,8 @@ export const CONFIG = {
     //           'swing' = 擺盪（鐘擺式，往上甩時放開）
     style: 'pull',
     pull: {
-      accel: 36, // 朝勾點的拉力（m/s²）
-      maxSpeed: 36, // 拉索時朝勾點方向的最高速度
+      accel: 54, // 朝勾點的拉力（m/s²）
+      maxSpeed: 50, // 拉索時朝勾點方向的最高速度
       gravityScale: 0.5, // 拉索期間的重力比例
       sideDamp: 0.35, // 側向速度每秒收斂比例（越小越保留側向橫移）
       steerAccel: 26, // 勾住時方向鍵／搖桿的側向操控力（m/s²）
@@ -69,7 +69,7 @@ export const CONFIG = {
   },
 
   boost: {
-    accel: 26,
+    accel: 36,
     gasMax: 100,
     gasUse: 26, // 每秒
     regenGround: 35,
@@ -146,6 +146,10 @@ export const CONFIG = {
     followSmoothTime: 0.4, // 飛行方向的平滑時間（擺盪時不會急轉）
     followPitch: -0.14,
     joystickTurnRate: 1.0,
+    // 手機：鉤住時鏡頭轉向人物面朝的方向（放索後再跟一小段）
+    hookFollow: true,
+    hookFollowRate: 3.0,
+    hookFollowAfter: 0.8, // 放索後繼續跟隨幾秒
   },
 
   speedLines: {
@@ -157,6 +161,14 @@ export const CONFIG = {
   },
 
   sensitivity: { mouse: 0.0022, touch: 0.0065 },
+
+  // 手機準心搖桿（右邊鋼索鈕）：準心在畫面上移動，而不是轉鏡頭
+  reticle: {
+    stickRadius: 70, // 手指拖多遠（px）準心到最邊
+    rangeX: 0.75, // 準心最遠到畫面寬度的幾成（NDC）
+    rangeY: 0.6,
+    edgeTurnRate: 1.6, // 推到邊緣時鏡頭慢慢轉的速度（rad/s）
+  },
 
   world: {
     wallRadius: 270,
