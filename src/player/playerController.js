@@ -55,6 +55,11 @@ export class PlayerController {
     this.events.length = 0;
   }
 
+  /** 速度倍率換算後的「體感速度」：斬擊判定、速度線、鏡頭等速度感都用它 */
+  get feelSpeed() {
+    return this.vel.length() / Math.max(0.25, this.speedScale);
+  }
+
   get speed() {
     return this.vel.length();
   }
@@ -100,7 +105,7 @@ export class PlayerController {
       if (this.ropeStyle === 'pull') {
         // 拉索放開：往上衝（像衝過牆頂那樣）
         const P = this.cfg.hook.pull;
-        this.vel.y = this.vel.y * (1 + P.launchBonus) + P.launchUp;
+        this.vel.y = this.vel.y * (1 + P.launchBonus) + P.launchUp * Math.max(0.3, this.speedScale);
         if (this.wallCarryTimer > 0) {
           this.carry.copy(this.wallCarry).multiplyScalar(P.wallCarry);
           this.carryTimer = 2.0;
@@ -221,7 +226,7 @@ export class PlayerController {
       const tgt = this.lunge.target();
       _tmp.subVectors(tgt, this.pos);
       const d = _tmp.length();
-      const spd = Math.max(this.speed, cfg.strike.lungeSpeed);
+      const spd = Math.max(this.speed, cfg.strike.lungeSpeed * Math.max(0.3, this.speedScale));
       this.vel.copy(_tmp).multiplyScalar(spd / Math.max(d, 1e-3));
       if (d <= cfg.strike.lungeHitDist || this.lunge.timer <= 0) {
         this.lunge.done = true;
@@ -346,7 +351,7 @@ export class PlayerController {
       }
     }
 
-    softLimitSpeed(this.vel, P.maxSpeed * this.speedScale, P.softLimitRate, dt);
+    softLimitSpeed(this.vel, Math.max(P.minSpeedCap, P.maxSpeed * this.speedScale), P.softLimitRate, dt);
     this.maxSpeed = Math.max(this.maxSpeed, this.speed);
     if (hitWall) this.emit('bump', {});
   }
@@ -368,8 +373,10 @@ export class PlayerController {
       if (this.pulling && hk.pullOn) {
         // 拉索：朝勾點加速到 maxSpeed，切線速度保留 → 帶著原本的慣性畫出弧線
         const along = this.vel.dot(_anchor);
-        const room = H.pull.maxSpeed * this.speedScale - along;
-        if (room > 0) this.vel.addScaledVector(_anchor, Math.min(H.pull.accel * this.speedScale * h, room));
+        // 速度倍率很低時，拉力仍保有下限（否則拉不贏重力），但最高速度照比例降
+        const room = Math.max(H.pull.minSpeed, H.pull.maxSpeed * this.speedScale) - along;
+        const acc = Math.max(H.pull.minAccel, H.pull.accel * this.speedScale);
+        if (room > 0) this.vel.addScaledVector(_anchor, Math.min(acc * h, room));
         // 側向速度慢慢收斂，路線最後會對準勾點（但保留一段弧線）
         _tmp.copy(this.vel).addScaledVector(_anchor, -this.vel.dot(_anchor));
         this.vel.addScaledVector(_tmp, -Math.min(1, H.pull.sideDamp * h));

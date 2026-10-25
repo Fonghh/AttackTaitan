@@ -49,7 +49,7 @@ export class CameraRig {
   update(dt, pc, opts) {
     const C = this.cfg.camera;
     this.time += dt;
-    const speed = pc.speed;
+    const speed = pc.feelSpeed ?? pc.speed; // 速度倍率換算後的體感速度
 
     // 空中自動轉向飛行方向。用平滑過的速度方向，擺盪時鏡頭不會跟著急轉。
     const hs = Math.hypot(pc.vel.x, pc.vel.z);

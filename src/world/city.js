@@ -234,9 +234,29 @@ export function buildCity(scene, cfg, spawn, lowSpec) {
 
   scene.updateMatrixWorld(true);
 
+  // 準心吸附點：每棟建築的屋頂四角、屋頂邊緣中點、轉角直邊（上段與中段），略往內縮避免打在邊線外
+  const snapAnchors = [];
+  for (const m of hookables) {
+    const g = m.geometry.parameters;
+    if (m.geometry.type !== 'BoxGeometry' || !g) continue;
+    const { x, z } = m.position;
+    const hw = g.width / 2 - 0.15, hd = g.depth / 2 - 0.15, top = g.height - 0.3;
+    const add = (px, py, pz) => snapAnchors.push({ pos: new THREE.Vector3(px, py, pz), object: m });
+    for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      add(x + sx * hw, top, z + sz * hd);
+      add(x + sx * hw, top * 0.7, z + sz * hd);
+      add(x + sx * hw, top * 0.45, z + sz * hd);
+    }
+    add(x, top, z - hd);
+    add(x, top, z + hd);
+    add(x - hw, top, z);
+    add(x + hw, top, z);
+  }
+
   return {
     colliders,
     hookables,
+    snapAnchors,
     sun,
     /** 讓陰影範圍跟著玩家 */
     update(focus) {

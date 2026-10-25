@@ -13,13 +13,14 @@ export function napeDamage(speed, cfg) {
 
 /**
  * 評估目前能否成功斬擊弱點。
- * @param {{playerPos:Vector3, playerVel:Vector3, napePos:Vector3, titanForward:Vector3}} s
+ * @param {{playerPos:Vector3, playerVel:Vector3, napePos:Vector3, titanForward:Vector3, speedScale?:number}} s
+ *   speedScale：速度倍率，速度條件與傷害用換算後的體感速度
  */
 export function evaluateStrike(s, cfg) {
   const C = cfg.strike;
   _to.subVectors(s.playerPos, s.napePos);
   const dist = _to.length();
-  const speed = s.playerVel.length();
+  const speed = s.playerVel.length() / Math.max(0.25, s.speedScale || 1);
   const dirFromNape = dist > 1e-6 ? _to.multiplyScalar(1 / dist) : _to.set(0, 0, -1);
   // 玩家位於後頸哪一側：只看水平方向；從正上方落下也算有效
   const hx = dirFromNape.x, hz = dirFromNape.z;
@@ -27,8 +28,9 @@ export function evaluateStrike(s, cfg) {
   const frontDot = hl < 0.35 ? -1 : (hx * s.titanForward.x + hz * s.titanForward.z) / hl;
   // 速度方向是否朝向弱點
   let approachDot = 1;
-  if (speed > 1e-3) {
-    _vd.copy(s.playerVel).multiplyScalar(1 / speed);
+  const rawSpeed = s.playerVel.length();
+  if (rawSpeed > 1e-3) {
+    _vd.copy(s.playerVel).multiplyScalar(1 / rawSpeed);
     approachDot = -_vd.dot(dirFromNape);
   }
   const inRange = dist <= C.range;

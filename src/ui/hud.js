@@ -92,10 +92,11 @@ export class Hud {
     const { pc, titan, camera, aims, strikeEval, napePos, touchMode, smartSide } = s;
     const e = this.el;
     const sp = pc.speed;
+    const feel = pc.feelSpeed ?? sp; // 體感速度（速度倍率換算）
     e.speed.textContent = sp.toFixed(0);
     e.speedKmh.textContent = `${(sp * 3.6).toFixed(0)} km/h`;
-    e.speedBar.style.width = `${Math.min(100, (sp / this.cfg.player.maxSpeed) * 100)}%`;
-    e.speedBar.classList.toggle('fast', sp > 35);
+    e.speedBar.style.width = `${Math.min(100, (feel / this.cfg.player.maxSpeed) * 100)}%`;
+    e.speedBar.classList.toggle('fast', feel > 35);
     e.gas.style.width = `${(pc.gas / this.cfg.boost.gasMax) * 100}%`;
     e.gas.classList.toggle('low', pc.gas < 20);
     e.hp.style.width = `${(pc.hp / this.cfg.player.maxHp) * 100}%`;
@@ -120,7 +121,7 @@ export class Hud {
         el.className = 'aim-mark none';
         return;
       }
-      el.className = `aim-mark ok ${aim.object.userData.titanPart ? 'titan' : ''}`;
+      el.className = `aim-mark ok ${aim.object.userData.titanPart ? 'titan' : ''} ${aim.snapped ? 'snapped' : ''}`;
       el.style.left = `${pos.x}px`;
       el.style.top = `${pos.y}px`;
       if (label) el.dataset.label = label;
@@ -182,7 +183,7 @@ export class Hud {
         e.chkSpeed.className = ev.fastEnough ? 'ok' : '';
         e.chkAngle.className = ev.angleOk ? 'ok' : 'bad';
         e.chkDist.textContent = `距離 ${ev.dist.toFixed(1)}m`;
-        e.chkSpeed.textContent = `速度 ${ev.speed.toFixed(0)}`;
+        e.chkSpeed.textContent = `速度 ${pc.speed.toFixed(0)}/${(this.cfg.strike.minSpeed * (pc.speedScale ?? 1)).toFixed(0)}`;
         e.chkAngle.textContent = ev.angleOk ? '角度 後方' : '角度 正面✕';
       }
     } else {
@@ -192,7 +193,7 @@ export class Hud {
     }
 
     // 速度暗角
-    const v = Math.max(0, Math.min(1, (sp - 18) / 45));
+    const v = Math.max(0, Math.min(1, (feel - 18) / 45));
     e.vignette.style.opacity = (v * 0.85).toFixed(3);
     e.hang.classList.toggle('on', pc.hangTimer > 0);
 

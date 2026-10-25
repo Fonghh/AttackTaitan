@@ -114,9 +114,10 @@ class SpeedLines {
     this.intensity = 0;
   }
 
-  update(dt, pos, vel) {
+  /** @param {number} feel 體感速度倍數（速度倍率越低，同樣速度看起來越快） */
+  update(dt, pos, vel, feel = 1) {
     const C = this.cfg;
-    const speed = vel.length();
+    const speed = vel.length() * feel;
     const f = Math.max(0, Math.min(1, (speed - C.minSpeed) / (C.fullSpeed - C.minSpeed)));
     this.intensity = f;
     const vdir = _v.copy(vel).normalize();
@@ -344,7 +345,7 @@ export class Effects {
   update(dt, pc, model) {
     this.glow.update(dt);
     this.smoke.update(dt);
-    this.speedLines.update(dt, pc.pos, pc.vel);
+    this.speedLines.update(dt, pc.pos, pc.vel, pc.speed > 1e-3 ? pc.feelSpeed / pc.speed : 1);
     this.slashes.update(dt);
     for (const f of this.flashes) {
       if (!f.m.visible) continue;

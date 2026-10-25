@@ -51,6 +51,7 @@ try {
   const sim = await page.evaluate(() => {
     const g = window.__game;
     g.renderer.setAnimationLoop(null);
+    g.pc.speedScale = 1; // 物理測試固定用 100% 速度倍率
     const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
     const dt = 1 / 60;
     const log = { maxSpeed: 0, attached: false, swingMaxLen: 0, ropeViolation: 0, released: false, flingY: 0, hung: false, landedSlide: false };
@@ -130,6 +131,7 @@ try {
     g.restart(true);
     g.renderer.setAnimationLoop(null);
     g.pc.ropeStyle = 'pull';
+    g.pc.speedScale = 1;
     const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
     const run = (it) => { for (const e of it.events) g._handleEvent(e); g.step(1 / 60, it); };
     for (let i = 0; i < 50; i++) run({ ...base(), move: { x: 0, y: 1 } });
@@ -163,6 +165,30 @@ try {
   check('[pull] rope stays attached until tapped again; release launches upward', pull.events.includes('arrive') && pull.events.includes('fling'), pull.events.join(','));
   check('[pull] flies over the roof and keeps going', pull.events.includes('vault') && pull.maxY > pull.anchorY + 8 && pull.travel > 80, `peak ${pull.maxY.toFixed(0)}m (anchor ${pull.anchorY.toFixed(0)}m), travel ${pull.travel.toFixed(0)}m`);
   check('[pull] no teleport', pull.maxJump < 0.3, `${pull.maxJump.toFixed(2)}m`);
+  // 低速倍率（20%）：拉力仍拉得動（有下限），速度上限照比例降
+  const slow = await page.evaluate(() => {
+    const g = window.__game;
+    g.restart(true);
+    g.renderer.setAnimationLoop(null);
+    g.pc.speedScale = 0.2;
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    const run = (it) => { for (const e of it.events) g._handleEvent(e); g.step(1 / 60, it); };
+    for (let i = 0; i < 50; i++) run({ ...base(), move: { x: 0, y: 1 } });
+    g.rig.pitch = 0.35;
+    g.rig.yaw -= 0.12;
+    for (let i = 0; i < 3; i++) run(base());
+    const anchor = g.aims.auto && g.aims.auto.point.clone();
+    run({ ...base(), events: ['down:left'] });
+    let maxSp = 0, minDist = 1e9;
+    for (let i = 0; i < 900; i++) {
+      run(base());
+      maxSp = Math.max(maxSp, g.pc.speed);
+      if (anchor) minDist = Math.min(minDist, g.pc.pos.distanceTo(anchor));
+    }
+    g.pc.speedScale = 1;
+    return { maxSp, minDist };
+  });
+  check('slow speed (20%): rope still pulls the player up to the anchor', slow.minDist < 9 && slow.maxSp < 20, `closest ${slow.minDist.toFixed(1)}m, max ${slow.maxSp.toFixed(1)} m/s`);
   check('pressing the rope does not trigger a strike', pull.strikes === 0, `strikes=${pull.strikes}`);
   await page.evaluate(() => window.__game.renderer.render(window.__game.scene, window.__game.camera));
   await page.screenshot({ path: `${OUT}/02b-after-pull.png` });
@@ -348,11 +374,39 @@ try {
     const d = Math.atan2(Math.sin(g.model.yaw - g.rig.yaw), Math.cos(g.model.yaw - g.rig.yaw));
     return g.pc.anyAttached && Math.abs(d) < 0.25 && Math.hypot(g.pc.vel.x, g.pc.vel.z) > 6;
   }, null, { timeout: 30000 }).then(() => true).catch(() => false).then((ok) => check('mobile: while hooked the camera turns to face where the character is heading', ok));
+  // 準心吸附：把準心移到大樓轉角附近（偏 20px），應吸到轉角上
+  const snap = await mp.evaluate(() => {
+    const g = window.__game;
+    g.pc.releaseAll();
+    const W = innerWidth, H = innerHeight;
+    const v = g.pc.pos.clone();
+    for (const a of g.city.snapAnchors) {
+      if (a.pos.distanceTo(g.pc.pos) > 70) continue;
+      v.copy(a.pos).project(g.camera);
+      if (Math.abs(v.x) > 0.6 || Math.abs(v.y) > 0.5 || v.z > 1) continue;
+      const sx = (v.x * 0.5 + 0.5) * W + 20, sy = (-v.y * 0.5 + 0.5) * H;
+      g.input.touch.aimX = (sx / W * 2 - 1) / g.cfg.reticle.rangeX;
+      g.input.touch.aimY = -(sy / H * 2 - 1) / g.cfg.reticle.rangeY;
+      g._updateAims();
+      const aim = g.aims.auto;
+      if (aim && aim.snapped) {
+        g.input.touch.aimX = g.input.touch.aimY = 0;
+        return { snapped: true, err: aim.point.distanceTo(a.pos).toFixed(2) };
+      }
+    }
+    g.input.touch.aimX = g.input.touch.aimY = 0;
+    return { snapped: false };
+  });
+  check('mobile: crosshair snaps to a nearby building corner/edge', snap.snapped, JSON.stringify(snap));
   // 速度倍率
   await mp.evaluate(() => window.__game.pause());
   await mp.tap('#spd-up');
   const spd = await mp.evaluate(() => ({ s: window.__game.pc.speedScale, label: document.getElementById('spd-val').textContent }));
-  check('pause menu speed control', spd.s === 1.1 && spd.label.includes('110'), JSON.stringify(spd));
+  check('pause menu speed control (default 50%, step 10%)', spd.s === 0.6 && spd.label.includes('60'), JSON.stringify(spd));
+  for (let i = 0; i < 8; i++) await mp.tap('#spd-down');
+  const spdMin = await mp.evaluate(() => window.__game.pc.speedScale);
+  check('speed can go down to 10%', spdMin === 0.1, String(spdMin));
+  for (let i = 0; i < 4; i++) await mp.tap('#spd-up');
   await mp.tap('#spd-down');
   await mp.tap('#btn-resume');
   await mp.screenshot({ path: `${OUT}/05-mobile.png` });

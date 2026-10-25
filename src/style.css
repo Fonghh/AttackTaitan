@@ -297,6 +297,12 @@ body {
   height: 20px;
   margin: -10px 0 0 -10px;
 }
+.aim-mark.snapped {
+  border-radius: 3px;
+  color: #ffd27a;
+  box-shadow: 0 0 8px rgba(255, 210, 122, 0.8);
+  transform: rotate(45deg);
+}
 .aim-mark.titan {
   border-style: dashed;
 }
@@ -685,7 +691,7 @@ body {
 }
 .tbtn.on {
   border-color: var(--rope-l);
-  box-shadow: 0 0 12px var(--rope-l);
+  box-shadow: 0 0 10px var(--rope-l);
 }
 .t-pause {
   left: 12px;
@@ -696,57 +702,57 @@ body {
   border-radius: 10px;
 }
 .t-boost {
-  right: 18px;
-  bottom: calc(46% + env(safe-area-inset-bottom));
-  width: 78px;
-  height: 78px;
+  /* 右下角：加速；左邊斬擊；上面鋼索（按鈕縮小、間距 8px） */
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  width: 44px;
+  height: 44px;
+  font-size: 11px;
   background: conic-gradient(rgba(191, 231, 255, 0.35) var(--gas, 100%), rgba(10, 14, 20, 0.45) 0);
 }
 .t-boost.on {
   border-color: var(--gas);
-  box-shadow: 0 0 14px var(--gas);
+  box-shadow: 0 0 10px var(--gas);
 }
 .t-hook {
-  right: 22px;
-  bottom: calc(26% + env(safe-area-inset-bottom));
-  width: 88px;
-  height: 88px;
-  font-size: 16px;
+  right: calc(14px + env(safe-area-inset-right, 0px));
+  bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+  width: 48px;
+  height: 48px;
+  font-size: 12px;
 }
 .t-hook span {
   display: block;
 }
 .t-hook small {
-  display: block;
-  font-size: 10px;
-  font-weight: 600;
-  opacity: 0.7;
+  display: none;
 }
 .t-hook.no-target {
   opacity: 0.55;
 }
 .t-hookL,
 .t-hookR {
-  bottom: calc(27% + env(safe-area-inset-bottom));
-  width: 70px;
-  height: 70px;
+  bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+  width: 44px;
+  height: 44px;
+  font-size: 11px;
 }
 .t-hookL {
-  right: 100px;
+  right: calc(68px + env(safe-area-inset-right, 0px));
 }
 .t-hookR {
-  right: 18px;
+  right: calc(16px + env(safe-area-inset-right, 0px));
 }
 .t-hookR.on {
   border-color: var(--rope-r);
-  box-shadow: 0 0 12px var(--rope-r);
+  box-shadow: 0 0 10px var(--rope-r);
 }
 .t-strike {
-  right: 30px;
-  bottom: calc(6% + env(safe-area-inset-bottom));
-  width: 92px;
-  height: 92px;
-  font-size: 18px;
+  right: calc(68px + env(safe-area-inset-right, 0px));
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  width: 48px;
+  height: 48px;
+  font-size: 12px;
   border-color: rgba(255, 181, 71, 0.8);
   background: rgba(60, 36, 8, 0.5);
 }

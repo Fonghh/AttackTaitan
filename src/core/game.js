@@ -69,7 +69,7 @@ export class Game {
     this.cameraFollow = this._load('cameraFollow2', cfg.camera.autoFollow ? 'on' : 'off') === 'on';
     this.pc.ropeStyle = this._load('ropeStyle', cfg.hook.style);
     this.hookFollow = this._load('hookFollow', cfg.camera.hookFollow ? 'on' : 'off') === 'on';
-    this.pc.speedScale = Math.max(0.5, Math.min(1.5, Number(this._load('speedScale', '1')) || 1));
+    this.pc.speedScale = Math.max(0.1, Math.min(1.5, Number(this._load('speedScale2', String(cfg.player.defaultSpeedScale))) || cfg.player.defaultSpeedScale));
     this.touchUI.setMode(this.hookMode);
 
     this.strikeEval = { dist: 999, speed: 0, ok: false, inRange: false, fastEnough: false, angleOk: false, lunge: false };
@@ -114,8 +114,8 @@ export class Game {
       this._syncModeLabel();
     });
     const setSpeed = (d) => {
-      this.pc.speedScale = Math.round(Math.max(0.5, Math.min(1.5, this.pc.speedScale + d)) * 10) / 10;
-      this._save('speedScale', String(this.pc.speedScale));
+      this.pc.speedScale = Math.round(Math.max(0.1, Math.min(1.5, this.pc.speedScale + d)) * 10) / 10;
+      this._save('speedScale2', String(this.pc.speedScale));
       this._syncModeLabel();
     };
     $('spd-down').addEventListener('click', () => setSpeed(-0.1));
@@ -320,7 +320,7 @@ export class Game {
   _evaluate() {
     const t = this.titan;
     t.napeWorld(this.napePos);
-    const ev = evaluateStrike({ playerPos: this.pc.pos, playerVel: this.pc.vel, napePos: this.napePos, titanForward: t.forward }, this.cfg);
+    const ev = evaluateStrike({ playerPos: this.pc.pos, playerVel: this.pc.vel, napePos: this.napePos, titanForward: t.forward, speedScale: this.pc.speedScale }, this.cfg);
     _v.subVectors(this.napePos, this.pc.pos);
     ev.lunge = t.alive && !this.pc.lunge && canLunge(ev, _v, this.rig.forward, this.pc.gas, this.cfg);
     return ev;
@@ -351,7 +351,7 @@ export class Game {
     } else if (ev.dist < this.cfg.strike.lungeRange && !ev.angleOk) {
       this.hud.toast('正面無法斬擊！繞到巨人後方', 'warn', 1.2);
     } else if (ev.inRange && !ev.fastEnough) {
-      this.hud.toast(`速度不足（需 ${this.cfg.strike.minSpeed} m/s）`, 'warn', 1.2);
+      this.hud.toast(`速度不足（需 ${(this.cfg.strike.minSpeed * this.pc.speedScale).toFixed(0)} m/s）`, 'warn', 1.2);
     }
   }
 
@@ -391,7 +391,7 @@ export class Game {
     this.hud.popup(sp.x, sp.y - 20, `${perfect ? '完美斬擊！' : '要害！'} -${dmg}`, perfect ? 'perfect' : 'crit');
     this.pc.vel.y = Math.max(this.pc.vel.y, 0) + 5; // 斬過後微微上彈
     if (!this.titan.alive) this._onKill();
-    else this.hud.toast(`速度 ${ev.speed.toFixed(0)} m/s → 傷害 ${dmg}`, 'good', 1.3);
+    else this.hud.toast(`速度 ${this.pc.speed.toFixed(0)} m/s → 傷害 ${dmg}`, 'good', 1.3);
   }
 
   _onKill() {
@@ -500,7 +500,7 @@ export class Game {
       this.fx.steam(this.napePos, 1);
     }
 
-    this.audio.update(pc.speed, pc.boosting, pc.reeling, pc.anyAttached);
+    this.audio.update(pc.feelSpeed, pc.boosting, pc.reeling, pc.anyAttached);
     this.hud.update(dt, {
       pc,
       titan,
@@ -550,7 +550,12 @@ export class Game {
     };
     if (this.hookMode === 'single') {
       this.aims.left = this.aims.right = null;
-      const a = (this.aims.auto = aimAt(0));
+      // 手機準心吸附（拉索模式）：準心靠近轉角／屋頂邊緣時優先吸過去
+      let snapped = null;
+      if (this.touch && R.snap && this.pc.ropeStyle === 'pull') {
+        snapped = this.aimer.snapAim(this.camera, this.reticle, p, H.range, this.city.snapAnchors, R.snapRadiusPx, innerWidth, innerHeight);
+      }
+      const a = (this.aims.auto = snapped || aimAt(0));
       if (a) {
         // 勾點在左邊就用左發射器，右邊用右發射器
         _right.set(-f.z, 0, f.x).normalize();

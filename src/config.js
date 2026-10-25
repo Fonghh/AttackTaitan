@@ -11,6 +11,8 @@ export const CONFIG = {
     airAccel: 14, // 空中 WASD 轉向加速度
     airThrust: 16, // 空中未勾索時按 Space 的上升噴氣
     maxSpeed: 68,
+    minSpeedCap: 10, // 速度倍率很低時，最高速度至少保留這麼多（m/s）
+    defaultSpeedScale: 0.5, // 速度倍率預設值（暫停選單可調 10%～150%）
     softLimitRate: 3, // 超過最高速時，每秒衰減多少比例
     dragCoef: 0.00012,
     maxHp: 100,
@@ -33,6 +35,8 @@ export const CONFIG = {
     pull: {
       accel: 54, // 朝勾點的拉力（m/s²）
       maxSpeed: 50, // 拉索時朝勾點方向的最高速度
+      minAccel: 18, // 速度倍率很低時的拉力下限（要拉得贏重力）
+      minSpeed: 6,
       gravityScale: 0.5, // 拉索期間的重力比例
       sideDamp: 0.35, // 側向速度每秒收斂比例（越小越保留側向橫移）
       steerAccel: 26, // 勾住時方向鍵／搖桿的側向操控力（m/s²）
@@ -168,6 +172,8 @@ export const CONFIG = {
     rangeX: 0.75, // 準心最遠到畫面寬度的幾成（NDC）
     rangeY: 0.6,
     edgeTurnRate: 1.6, // 推到邊緣時鏡頭慢慢轉的速度（rad/s）
+    snap: true, // 準心吸附：靠近建築轉角／屋頂邊緣時吸過去（手機）
+    snapRadiusPx: 44,
   },
 
   world: {

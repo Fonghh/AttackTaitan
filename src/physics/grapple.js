@@ -192,6 +192,46 @@ export class HookAimer {
     return null;
   }
 
+  /**
+   * 準心吸附：準心附近（螢幕距離 radiusPx 內）有建築的轉角／屋頂邊緣時，吸到那一點。
+   * 只採用鏡頭看得到的點（射線第一個打到的就是那棟建築、且就在該點附近）。
+   * @param {{x:number,y:number}} reticle 準心 NDC
+   * @param {{pos:Vector3, object:any}[]} anchors 可吸附點
+   */
+  snapAim(camera, reticle, playerPos, range, anchors, radiusPx, viewW, viewH) {
+    const rx = (reticle.x * 0.5 + 0.5) * viewW;
+    const ry = (-reticle.y * 0.5 + 0.5) * viewH;
+    const cands = [];
+    const p = this._dir;
+    for (const a of anchors) {
+      if (a.pos.distanceToSquared(playerPos) > range * range) continue;
+      p.copy(a.pos).project(camera);
+      if (p.z > 1 || p.z < -1) continue;
+      const sx = (p.x * 0.5 + 0.5) * viewW;
+      const sy = (-p.y * 0.5 + 0.5) * viewH;
+      const d = Math.hypot(sx - rx, sy - ry);
+      if (d < radiusPx) cands.push({ a, d });
+    }
+    cands.sort((u, v) => u.d - v.d);
+    const camPos = camera.position;
+    for (let i = 0; i < Math.min(4, cands.length); i++) {
+      const { a } = cands[i];
+      const dir = this._base.subVectors(a.pos, camPos);
+      const dist = dir.length();
+      dir.multiplyScalar(1 / dist);
+      this.ray.set(camPos, dir);
+      this.ray.near = 0;
+      this.ray.far = dist + 2;
+      this._hits.length = 0;
+      this.ray.intersectObjects(this.hookables, true, this._hits);
+      const h = this._hits.find((x) => !x.object.userData.noHook);
+      if (h && h.object === a.object && h.distance > dist - 1.5 && h.point.distanceTo(playerPos) <= range) {
+        return { point: h.point.clone(), object: h.object, assisted: true, snapped: true };
+      }
+    }
+    return null;
+  }
+
   _cast(origin, dir, playerPos, near, range) {
     this.ray.set(origin, dir);
     this.ray.near = near;
