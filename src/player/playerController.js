@@ -156,7 +156,21 @@ export class PlayerController {
 
     const attached = this.anyAttached;
     // 拉索模式：勾住就一直被拉；擺盪模式：只有 Space 捲收
-    const pulling = attached && this.ropeStyle === 'pull' && !this.lunge;
+    // 拉索靠近勾點後停止拉動（鋼索不斷，改成繞勾點擺盪），拉遠了再恢復
+    if (attached && this.ropeStyle === 'pull') {
+      const A = cfg.hook.pull.arriveDist;
+      for (const side of ['left', 'right']) {
+        const hk = this.hooks[side];
+        if (!hk.attached) continue;
+        const d = this.pos.distanceTo(hk.anchor(_anchor));
+        const passed = d < A * 2.5 && this.vel.dot(_tmp.subVectors(_anchor, this.pos)) < 0; // 已經衝過勾點
+        if (hk.pullOn && (d < A || passed)) {
+          hk.pullOn = false;
+          this.emit('arrive', { side });
+        } else if (!hk.pullOn && d > A * 3) hk.pullOn = true;
+      }
+    }
+    const pulling = attached && this.ropeStyle === 'pull' && !this.lunge && (this.hooks.left.pullOn || this.hooks.right.pullOn);
     this.pulling = pulling;
     this.reeling = pulling ? 1 : attached ? intent.reel : 0;
 
@@ -227,8 +241,8 @@ export class PlayerController {
         if (this.grounded && !(attached && this.reeling > 0)) {
           this._groundMove(h, intent);
         } else {
-          // 空中轉向
-          this.vel.addScaledVector(_wish, P.airAccel * h);
+          // 空中轉向；勾住時側向操控更強（朝方向鍵的方向擺盪／橫移）
+          this.vel.addScaledVector(_wish, (attached && this.ropeStyle === 'pull' ? cfg.hook.pull.steerAccel : P.airAccel) * h);
           if (airThrust) this.vel.y += P.airThrust * h;
         }
 
@@ -298,22 +312,6 @@ export class PlayerController {
     }
     this.grounded = grounded;
 
-    // 拉索：快到勾點時自動放開，靠慣性衝過頭
-    if (pulling) {
-      for (const side of ['left', 'right']) {
-        const hk = this.hooks[side];
-        if (!hk.attached) continue;
-        hk.anchor(_anchor);
-        const d = this.pos.distanceTo(_anchor);
-        _tmp.subVectors(_anchor, this.pos);
-        const passed = d < 12 && this.vel.dot(_tmp) < 0; // 已經衝過勾點
-        if (d < Math.max(cfg.hook.pull.arriveDist, this.speed * 0.07) || passed) {
-          this.emit('arrive', { side });
-          this.releaseHook(side);
-        }
-      }
-    }
-
     // 落地判定 → 滑行
     if (this.grounded && !wasGrounded) {
       const hs = Math.hypot(this.vel.x, this.vel.z);
@@ -366,7 +364,7 @@ export class PlayerController {
       const dist = _anchor.length();
       if (dist < 1e-3) continue;
       _anchor.multiplyScalar(1 / dist); // 指向勾點的單位向量
-      if (this.pulling) {
+      if (this.pulling && hk.pullOn) {
         // 拉索：朝勾點加速到 maxSpeed，切線速度保留 → 帶著原本的慣性畫出弧線
         const along = this.vel.dot(_anchor);
         const room = H.pull.maxSpeed - along;

@@ -1,5 +1,9 @@
 // 手機觸控操作：左下動態搖桿、右側按鈕、空白處拖曳轉視角。
-// 鋼索按鈕：'single'（單索，按住＝勾住擺盪、放開＝放索，預設）／'dual'（左右雙鉤，各自按住）。
+// 鋼索按鈕（像射擊遊戲的開火鍵）：按住拖曳＝調整準星方向；
+//   沒勾住時，放開手指＝發射；已勾住時，點一下＝放開鋼索（拖曳只會轉視角）。
+// 'single'（單索，預設）／'dual'（左右雙鉤）。
+
+const TAP_MOVE = 14; // 手指移動小於此距離（px）視為點一下
 
 export class TouchControls {
   constructor(root, input, cfg) {
@@ -8,17 +12,18 @@ export class TouchControls {
     this.root = root;
     this.mode = 'single';
     this.joy = null; // { id, ox, oy }
+    this.hookActive = { auto: false, left: false, right: false };
     this.looks = new Map(); // pointerId → {x, y}
 
     root.innerHTML = `
       <div class="joy-base" hidden><div class="joy-knob"></div></div>
       <button class="tbtn t-pause" data-act="pause" aria-label="暫停">II</button>
       <button class="tbtn t-boost" data-act="boost">加速</button>
-      <button class="tbtn t-hook" data-hold="auto">鋼索<small>按住</small></button>
+      <button class="tbtn t-hook" data-hold="auto"><span>鋼索</span><small>拖曳瞄準</small></button>
       <button class="tbtn t-hookL" data-hold="left">左鉤</button>
       <button class="tbtn t-hookR" data-hold="right">右鉤</button>
       <button class="tbtn t-strike" data-act="strike">斬擊</button>
-      <div class="t-hint">按住「鋼索」被拉過去，往上衝時放開。左下拖曳＝移動，空白處拖曳＝轉視角</div>`;
+      <div class="t-hint">左下＝移動。按住「鋼索」拖曳瞄準、放開發射；勾住後點一下放開</div>`;
     this.base = root.querySelector('.joy-base');
     this.knob = root.querySelector('.joy-knob');
     this.btn = {
@@ -59,7 +64,7 @@ export class TouchControls {
   _releaseAll() {
     for (const b of this.root.querySelectorAll('.tbtn.pressed')) {
       b.classList.remove('pressed');
-      if (b.dataset.hold) this.input.push(`up:${b.dataset.hold}`);
+      b._drag = null;
     }
     this.input.touch.boost = false;
   }
@@ -67,12 +72,26 @@ export class TouchControls {
   /** 依鋼索狀態讓按鈕亮起 */
   sync(pc, canHook) {
     const l = pc.hooks.left.active, r = pc.hooks.right.active;
+    this.hookActive.auto = l || r;
+    this.hookActive.left = l;
+    this.hookActive.right = r;
+    const label = this.btn.auto.firstElementChild;
+    const sub = this.btn.auto.lastElementChild;
+    const t = l || r ? ['放索', '點一下'] : ['鋼索', '拖曳瞄準'];
+    if (label.textContent !== t[0]) {
+      label.textContent = t[0];
+      sub.textContent = t[1];
+    }
     this.btn.left.classList.toggle('on', l);
     this.btn.right.classList.toggle('on', r);
     this.btn.auto.classList.toggle('on', l || r);
     this.btn.auto.classList.toggle('no-target', !canHook && !(l || r));
     this.btn.boost.classList.toggle('on', pc.boosting);
     this.btn.boost.style.setProperty('--gas', `${(pc.gas / this.cfg.boost.gasMax) * 100}%`);
+  }
+
+  cancelAim() {
+    for (const b of Object.values(this.btn)) b._drag = null;
   }
 
   _bindButton(b) {
@@ -85,19 +104,37 @@ export class TouchControls {
         b.setPointerCapture?.(e.pointerId);
       } catch {}
       b.classList.add('pressed');
-      if (hold) this.input.push(`down:${hold}`);
-      else if (act === 'boost') this.input.touch.boost = true;
+      if (hold) {
+        b._drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, wasActive: this.hookActive[hold] };
+      } else if (act === 'boost') this.input.touch.boost = true;
       else this.input.push(act);
     });
-    const end = (e) => {
+    if (hold) {
+      b.addEventListener('pointermove', (e) => {
+        const d = b._drag;
+        if (!d || e.pointerId !== d.id) return;
+        e.stopPropagation();
+        const dx = e.clientX - d.x, dy = e.clientY - d.y;
+        d.moved += Math.abs(dx) + Math.abs(dy);
+        const s = this.cfg.sensitivity.touch;
+        this.input.addLook(dx * s, dy * s);
+        d.x = e.clientX;
+        d.y = e.clientY;
+      });
+    }
+    const end = (e, cancelled) => {
       e.stopPropagation();
       if (!b.classList.contains('pressed')) return;
       b.classList.remove('pressed');
-      if (hold) this.input.push(`up:${hold}`);
       if (act === 'boost') this.input.touch.boost = false;
+      const d = b._drag;
+      b._drag = null;
+      if (!hold || !d || cancelled) return;
+      // 沒勾住：放開＝發射（拖曳瞄準後也會發射）；已勾住：只有「點一下」才放開
+      if (!d.wasActive || d.moved < TAP_MOVE) this.input.push(`down:${hold}`);
     };
-    b.addEventListener('pointerup', end);
-    b.addEventListener('pointercancel', end);
+    b.addEventListener('pointerup', (e) => end(e, false));
+    b.addEventListener('pointercancel', (e) => end(e, true));
   }
 
   _down(e) {

@@ -21,6 +21,7 @@ export class Hook {
     this.length = 0;
     this.taut = false;
     this.attachTime = 0; // 勾住了多久
+    this.pullOn = true; // 拉索模式：是否正在拉
   }
 
   get attached() {
@@ -73,6 +74,7 @@ export class Hook {
       }
       this.state = 'attached';
       this.attachTime = 0;
+      this.pullOn = true;
       this.length = Math.max(1, dist * initialSlack);
       return true;
     }

@@ -64,13 +64,10 @@ export class Game {
     this.autoSide = 'right';
     // 鋼索模式：single = 單索（按住擺盪，預設）、dual = 左右雙索（進階）
     this.hookMode = this._load('hookMode2', 'single');
-    this.cameraFollow = this._load('cameraFollow', 'on') === 'on';
+    this.cameraFollow = this._load('cameraFollow2', cfg.camera.autoFollow ? 'on' : 'off') === 'on';
     this.pc.ropeStyle = this._load('ropeStyle', cfg.hook.style);
     this.touchUI.setMode(this.hookMode);
-    this.held = { auto: false, left: false, right: false };
-    this.pendingFire = { auto: false, left: false, right: false };
-    this.firedSide = { auto: null, left: 'left', right: 'right' };
-    this.pendingRelease = { left: false, right: false };
+
     this.strikeEval = { dist: 999, speed: 0, ok: false, inRange: false, fastEnough: false, angleOk: false, lunge: false };
     this.napePos = new THREE.Vector3();
     this.state = 'menu';
@@ -109,7 +106,7 @@ export class Game {
     });
     $('btn-follow').addEventListener('click', () => {
       this.cameraFollow = !this.cameraFollow;
-      this._save('cameraFollow', this.cameraFollow ? 'on' : 'off');
+      this._save('cameraFollow2', this.cameraFollow ? 'on' : 'off');
       this._syncModeLabel();
     });
     $('btn-mute').addEventListener('click', () => {
@@ -145,8 +142,7 @@ export class Game {
   }
 
   _releaseHeld() {
-    for (const k of Object.keys(this.held)) this.held[k] = this.pendingFire[k] = false;
-    this.pendingRelease.left = this.pendingRelease.right = false;
+    this.touchUI.cancelAim?.();
   }
 
   showPanel(id) {
@@ -221,61 +217,29 @@ export class Game {
     return this.model.launcherWorld(side, new THREE.Vector3());
   }
 
-  /** 按下鋼索鍵：有目標就發射；沒有目標時，按住期間一出現目標就自動發射 */
-  _hookDown(key) {
-    this.held[key] = true;
-    if (!this._tryFire(key)) {
-      this.audio.play('miss');
-      this.hud.toast('準星附近沒有可勾的目標（射程 85m）', 'warn', 0.8);
-    }
-  }
-
-  _tryFire(key) {
+  /**
+   * 鋼索鍵（切換式）：沒勾住 → 發射；已勾住（或飛行中）→ 放開。
+   * key = 'auto'（單索，依勾點位置選左右發射器）或 'left' / 'right'（雙索）
+   */
+  _hookToggle(key) {
     const pc = this.pc;
+    if (key === 'auto') {
+      if (pc.hooks.left.active || pc.hooks.right.active) {
+        pc.releaseAll();
+        return;
+      }
+    } else if (pc.hooks[key].active) {
+      pc.releaseHook(key);
+      return;
+    }
     const aim = this.aims[key];
     if (!aim) {
-      this.pendingFire[key] = true;
-      return false;
+      this.audio.play('miss');
+      this.hud.toast('準星上沒有可勾的目標（射程 85m）', 'warn', 0.8);
+      return;
     }
     const side = key === 'auto' ? this.autoSide : key;
-    if (key === 'auto') {
-      // 單索：同時只有一條，換勾點時直接接到新的
-      const other = side === 'left' ? 'right' : 'left';
-      if (pc.hooks[other].active) pc.hooks[other].release();
-      this.pendingRelease[other] = false;
-    }
-    this.pendingFire[key] = false;
-    this.pendingRelease[side] = false;
-    this.firedSide[key] = side;
     pc.fireHook(side, this._launcherPos(side), aim);
-    return true;
-  }
-
-  /** 放開鋼索鍵。快速點按時，至少讓鋼索勾住一小段時間（minHold）再放 */
-  _hookUp(key) {
-    this.held[key] = false;
-    this.pendingFire[key] = false;
-    const side = this.firedSide[key];
-    if (!side) return;
-    const h = this.pc.hooks[side];
-    if (!h.active) return;
-    if (h.state === 'flying' || h.attachTime < this.cfg.hook.minHold) this.pendingRelease[side] = true;
-    else this.pc.releaseHook(side);
-  }
-
-  _updateHookHolds() {
-    for (const key of ['auto', 'left', 'right']) {
-      if (this.held[key] && this.pendingFire[key]) this._tryFire(key);
-    }
-    for (const side of ['left', 'right']) {
-      if (!this.pendingRelease[side]) continue;
-      const h = this.pc.hooks[side];
-      if (!h.active) this.pendingRelease[side] = false;
-      else if (h.attached && h.attachTime >= this.cfg.hook.minHold) {
-        this.pendingRelease[side] = false;
-        this.pc.releaseHook(side);
-      }
-    }
   }
 
   _handleEvent(ev) {
@@ -303,8 +267,7 @@ export class Game {
         if (ev.startsWith('down:') || ev.startsWith('up:')) {
           const [kind, k] = ev.split(':');
           const key = this.hookMode === 'single' ? 'auto' : k === 'auto' ? 'right' : k;
-          if (kind === 'down') this._hookDown(key);
-          else this._hookUp(key);
+          if (kind === 'down') this._hookToggle(key); // 放開按鍵不做事（按一下勾、再按一下放）
         }
         break;
       case 'strike':
@@ -464,7 +427,6 @@ export class Game {
 
     // 鋼索瞄準預測（供下一次發射與 HUD 標記使用）
     this._updateAims();
-    this._updateHookHolds();
 
     // 斬擊條件
     this.strikeEval = this._evaluate();

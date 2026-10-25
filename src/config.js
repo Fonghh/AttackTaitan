@@ -10,7 +10,7 @@ export const CONFIG = {
     jumpSpeed: 9,
     airAccel: 14, // 空中 WASD 轉向加速度
     airThrust: 16, // 空中未勾索時按 Space 的上升噴氣
-    maxSpeed: 72,
+    maxSpeed: 55,
     softLimitRate: 3, // 超過最高速時，每秒衰減多少比例
     dragCoef: 0.00012,
     maxHp: 100,
@@ -31,16 +31,17 @@ export const CONFIG = {
     //           'swing' = 擺盪（鐘擺式，往上甩時放開）
     style: 'pull',
     pull: {
-      accel: 58, // 朝勾點的拉力（m/s²）
-      maxSpeed: 50, // 拉索時朝勾點方向的最高速度
-      gravityScale: 0.35, // 拉索期間的重力比例（拉力為主）
-      sideDamp: 1.6, // 側向速度每秒收斂比例
-      arriveDist: 4, // 離勾點這麼近時自動放開 → 慣性衝過頭
-      launchBonus: 0.25, // 放開時向上速度 ×(1+此值)
-      launchUp: 7, // 放開時額外的向上速度（m/s）
+      accel: 36, // 朝勾點的拉力（m/s²）
+      maxSpeed: 36, // 拉索時朝勾點方向的最高速度
+      gravityScale: 0.5, // 拉索期間的重力比例
+      sideDamp: 0.35, // 側向速度每秒收斂比例（越小越保留側向橫移）
+      steerAccel: 26, // 勾住時方向鍵／搖桿的側向操控力（m/s²）
+      arriveDist: 6, // 離勾點這麼近時停止拉動，鋼索保持勾住（變成繞勾點擺盪）
+      launchBonus: 0.15, // 放開時向上速度 ×(1+此值)
+      launchUp: 5, // 放開時額外的向上速度（m/s）
       wallCarry: 0.7, // 撞牆損失的水平速度，翻過牆頂後還回這個比例
-      aimAssistDeg: 5, // 準星沒打中時，在這個角度內找最近的勾點
-      aimAssistDegTouch: 8,
+      aimAssistDeg: 2, // 準星沒打中時，在這個角度內找最近的勾點（小，避免限制瞄準）
+      aimAssistDegTouch: 3,
     },
     travelSpeed: 260, // 鉤爪飛行速度（視覺 + 命中延遲）
     aimOffsetDeg: 10, // 雙索模式：左右鋼索相對準星的偏角
@@ -50,8 +51,7 @@ export const CONFIG = {
     boostSwing: 1.0, // 勾住時加速：推力沿擺盪切線方向（倍率）
     minLength: 2.5,
     maxCorrection: 0.35, // 每個子步驟鋼索最多修正的位置量（防止瞬移）
-    minHold: 0.3, // 快速點按：勾住後至少保持這麼久才放開
-    wallRunUp: 0.55, // 勾住時撞牆：撞擊速度的這個比例轉成沿牆往上的速度
+    wallRunUp: 0.35, // 勾住時撞牆：撞擊速度的這個比例轉成沿牆往上的速度
     // 擺盪輔助瞄準：準星打中的點不夠高時，在附近找更高的勾點
     swingAim: {
       goodHeight: 6, // 準星直接打中的點比角色高這麼多 → 直接採用
@@ -69,7 +69,7 @@ export const CONFIG = {
   },
 
   boost: {
-    accel: 38,
+    accel: 26,
     gasMax: 100,
     gasUse: 26, // 每秒
     regenGround: 35,
@@ -139,7 +139,7 @@ export const CONFIG = {
     minHFov: 78, // 直立手機時保證的最小水平視角
     maxVFov: 105,
     offsetSmooth: 10,
-    autoFollow: true, // 空中自動轉向飛行方向（暫停選單可關閉）
+    autoFollow: false, // 空中自動轉向飛行方向（預設關閉，暫停選單可開啟）
     autoFollowRate: 2.2,
     autoFollowDelayMouse: 0.9, // 滑鼠停止移動多久後開始跟隨
     autoFollowDelayTouch: 0.7,

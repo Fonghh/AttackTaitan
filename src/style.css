@@ -678,6 +678,9 @@ body {
   height: 88px;
   font-size: 16px;
 }
+.t-hook span {
+  display: block;
+}
 .t-hook small {
   display: block;
   font-size: 10px;

@@ -93,7 +93,7 @@ try {
     }
     log.swingMinY = g.pc.pos.y;
     const vyBefore = g.pc.vel.y;
-    g._hookUp('auto'); // 放開按鍵
+    g._hookToggle('auto'); // 再按一下＝放索
     log.released = !g.pc.anyAttached;
     log.flingY = g.pc.vel.y / Math.max(0.01, vyBefore);
     for (const e of g.pc.events.splice(0)) g._onPlayerEvent(e);
@@ -143,20 +143,24 @@ try {
     run({ ...base(), events: ['down:left'] });
     let maxPull = 0, maxY = 0, prev = g.pc.pos.clone(), maxJump = 0;
     const start = g.pc.pos.clone();
+    let releasedAt = -1;
     for (let i = 0; i < 240; i++) {
-      run(base());
+      // 到達勾點附近時再按一下放索（鋼索不會自己斷）
+      const evs = releasedAt < 0 && ev.has('arrive') ? ['down:left'] : [];
+      if (evs.length) releasedAt = i;
+      if (i === 200 && releasedAt < 0) ev.add('stillAttachedAt200:' + g.pc.anyAttached);
+      run({ ...base(), events: evs });
       if (g.pc.anyAttached) maxPull = Math.max(maxPull, g.pc.speed);
       maxY = Math.max(maxY, g.pc.pos.y);
       maxJump = Math.max(maxJump, g.pc.pos.distanceTo(prev) - g.pc.speed / 60);
       prev = g.pc.pos.clone();
     }
-    run({ ...base(), events: ['up:left'] });
     g._onPlayerEvent = orig;
     const travel = Math.hypot(g.pc.pos.x - start.x, g.pc.pos.z - start.z);
     return { anchorY, maxPull, maxY, maxJump, travel, events: [...ev], strikes: g.stats.strikes };
   });
-  check('[pull] rope pulls the player fast toward the anchor', pull.maxPull > 40, `${pull.maxPull.toFixed(1)} m/s`);
-  check('[pull] auto-release near the anchor launches upward', pull.events.includes('arrive') && pull.events.includes('fling'), pull.events.join(','));
+  check('[pull] rope pulls the player toward the anchor (slower, controllable)', pull.maxPull > 28 && pull.maxPull < 55, `${pull.maxPull.toFixed(1)} m/s`);
+  check('[pull] rope stays attached until tapped again; release launches upward', pull.events.includes('arrive') && pull.events.includes('fling'), pull.events.join(','));
   check('[pull] flies over the roof and keeps going', pull.events.includes('vault') && pull.maxY > pull.anchorY + 15 && pull.travel > 80, `peak ${pull.maxY.toFixed(0)}m (anchor ${pull.anchorY.toFixed(0)}m), travel ${pull.travel.toFixed(0)}m`);
   check('[pull] no teleport', pull.maxJump < 0.3, `${pull.maxJump.toFixed(2)}m`);
   check('pressing the rope does not trigger a strike', pull.strikes === 0, `strikes=${pull.strikes}`);
@@ -276,37 +280,40 @@ try {
     return { touch: g.touch, mode: g.hookMode, smartVisible: !document.querySelector('.t-hook').hidden };
   });
   check('mobile: touch UI with single hook button', touchInfo.touch && touchInfo.smartVisible);
-  // 快速點一下鋼索鈕 → 仍然要發射，且至少勾住 minHold 後才放
+  // 點一下鋼索鈕（沒勾住）→ 發射並保持勾住；再點一下 → 放開
   await mp.evaluate(() => {
     const g = window.__game;
-    g.rig.pitch = 0.05;
+    // 準星對準街邊大樓上緣（拉索模式是準星指哪勾哪）
+    g.rig.pitch = 0.35;
+    g.rig.yaw -= 0.12;
     window.__fired = 0;
-    window.__attached = 0;
     const f = g.pc.fireHook.bind(g.pc);
     g.pc.fireHook = (...a) => (window.__fired++, f(...a));
-    const id = setInterval(() => g.pc.anyAttached && window.__attached++, 16);
-    setTimeout(() => clearInterval(id), 30000);
   });
   await mp.waitForTimeout(300);
   const box = await mp.locator('.t-hook').boundingBox();
-  await mp.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  await mp.touchscreen.tap(cx, cy);
   // 無頭瀏覽器渲染很慢，用條件等待而不是固定時間
-  await mp.waitForFunction(() => window.__attached > 0 && !window.__game.pc.anyAttached, null, { timeout: 30000 }).catch(() => {});
-  const tap = await mp.evaluate(() => ({ fired: window.__fired, attached: window.__attached, active: window.__game.pc.anyAttached }));
-  check('mobile: quick tap fires a rope and gives a short swing', tap.fired === 1 && tap.attached > 0 && !tap.active, JSON.stringify(tap));
-  // 按住：持續勾住
-  await mp.evaluate(() => window.__game.restart(true));
-  await mp.waitForTimeout(200);
-  await mp.evaluate(() => (window.__game.rig.pitch = 0.05));
-  await mp.waitForTimeout(200);
-  const hb = await mp.locator('.t-hook').boundingBox();
-  await mp.dispatchEvent('.t-hook', 'pointerdown', { pointerId: 7, isPrimary: true, clientX: hb.x + 10, clientY: hb.y + 10 });
-  await mp.waitForFunction(() => window.__game.pc.hooks.left.attachTime > 0.6 || window.__game.pc.hooks.right.attachTime > 0.6, null, { timeout: 30000 }).catch(() => {});
-  const held = await mp.evaluate(() => window.__game.pc.anyAttached);
-  await mp.dispatchEvent('.t-hook', 'pointerup', { pointerId: 7, isPrimary: true });
+  await mp.waitForFunction(() => window.__game.pc.hooks.left.attachTime > 0.8 || window.__game.pc.hooks.right.attachTime > 0.8, null, { timeout: 30000 }).catch(() => {});
+  const tap1 = await mp.evaluate(() => ({ fired: window.__fired, attached: window.__game.pc.anyAttached }));
+  check('mobile: tap fires and the rope stays attached (toggle)', tap1.fired === 1 && tap1.attached, JSON.stringify(tap1));
+  await mp.touchscreen.tap(cx, cy);
   await mp.waitForFunction(() => !window.__game.pc.anyAttached, null, { timeout: 10000 }).catch(() => {});
-  const releasedAfter = await mp.evaluate(() => !window.__game.pc.anyAttached);
-  check('mobile: holding keeps the rope, releasing lets go', held && releasedAfter, `held=${held} released=${releasedAfter}`);
+  const tap2 = await mp.evaluate(() => !window.__game.pc.anyAttached);
+  check('mobile: second tap releases the rope', tap2);
+  // 按住鋼索鈕拖曳 → 轉動準星；放開 → 發射
+  await mp.evaluate(() => window.__game.restart(true));
+  await mp.waitForTimeout(300);
+  const yaw0 = await mp.evaluate(() => window.__game.rig.yaw);
+  await mp.dispatchEvent('.t-hook', 'pointerdown', { pointerId: 7, isPrimary: true, clientX: cx, clientY: cy });
+  for (let i = 1; i <= 6; i++) await mp.dispatchEvent('.t-hook', 'pointermove', { pointerId: 7, isPrimary: true, clientX: cx - i * 6, clientY: cy - i * 3 });
+  await mp.waitForTimeout(400);
+  const yaw1 = await mp.evaluate(() => window.__game.rig.yaw);
+  await mp.dispatchEvent('.t-hook', 'pointerup', { pointerId: 7, isPrimary: true, clientX: cx - 36, clientY: cy - 18 });
+  await mp.waitForFunction(() => window.__game.pc.anyAttached || window.__fired > 1, null, { timeout: 30000 }).catch(() => {});
+  const fired2 = await mp.evaluate(() => window.__game.pc.hooks.left.active || window.__game.pc.hooks.right.active || window.__game.pc.speed > 0);
+  check('mobile: dragging the hook button aims (camera turns), release fires', Math.abs(yaw1 - yaw0) > 0.1 && fired2, `yaw ${yaw0.toFixed(2)} → ${yaw1.toFixed(2)}`);
   await mp.screenshot({ path: `${OUT}/05-mobile.png` });
   check('no page errors (mobile)', merr.length === 0, merr.slice(0, 3).join(' | '));
 } finally {

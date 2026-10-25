@@ -171,25 +171,34 @@ test('damage scales with speed and caps', () => {
   assert.equal(napeDamage(200, CONFIG), CONFIG.strike.maxDamage);
 });
 
-test('pull style: rope pulls the player fast toward the anchor, then auto-releases', () => {
+test('pull style: pulls toward the anchor, stops pulling on arrival but keeps the rope', () => {
   const p = new PlayerController(CONFIG);
   assert.equal(p.ropeStyle, 'pull');
   p.pos.set(0, 20, 50);
   p.fireHook('right', p.pos.clone(), anchorAt(0, 40, 0));
   let maxSpeed = 0;
-  let released = false;
+  let arrived = false;
   let prev = p.pos.clone();
-  for (let i = 0; i < 180 && !released; i++) {
+  for (let i = 0; i < 300; i++) {
     p.update(1 / 60, idle(), world());
     maxSpeed = Math.max(maxSpeed, p.speed);
     assert.ok(p.pos.distanceTo(prev) <= p.speed / 60 + 0.4, 'no teleport');
     prev = p.pos.clone();
-    if (p.events.some((e) => e.type === 'arrive')) released = true;
+    if (p.events.some((e) => e.type === 'arrive')) arrived = true;
     p.events.length = 0;
   }
-  assert.ok(maxSpeed > 35, `pulled fast: ${maxSpeed.toFixed(1)} m/s`);
-  assert.ok(released && !p.anyAttached, 'auto-released near the anchor');
-  assert.ok(p.vel.y > 10, `launched upward past the anchor, vy=${p.vel.y.toFixed(1)}`);
+  assert.ok(maxSpeed > 28 && maxSpeed < 60, `pull speed ${maxSpeed.toFixed(1)} m/s`);
+  assert.ok(arrived, 'reached the anchor');
+  assert.ok(p.hooks.right.attached, 'rope is NOT released automatically');
+});
+
+test('pull style: steering while hooked gives strong sideways control', () => {
+  const p = new PlayerController(CONFIG);
+  p.pos.set(0, 20, 60);
+  p.fireHook('right', p.pos.clone(), anchorAt(0, 40, 0));
+  for (let i = 0; i < 15; i++) p.update(1 / 60, idle(), world());
+  for (let i = 0; i < 60; i++) p.update(1 / 60, { ...idle(), move: { x: 1, y: 0 } }, world());
+  assert.ok(p.vel.x > 12, `strafed sideways at ${p.vel.x.toFixed(1)} m/s`);
 });
 
 test('pull style: releasing while rising launches the player upward', () => {
