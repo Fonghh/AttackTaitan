@@ -46,6 +46,7 @@ test('high speed does not tunnel through a thin wall', () => {
 
 test('swinging on a rope never exceeds rope length and gains horizontal speed', () => {
   const p = new PlayerController(CONFIG);
+  p.ropeStyle = 'swing';
   p.pos.set(-20, 40, 0);
   p.vel.set(0, 0, 0);
   p.fireHook('right', p.pos.clone(), anchorAt(0, 60, 0));
@@ -66,6 +67,7 @@ test('swinging on a rope never exceeds rope length and gains horizontal speed', 
 
 test('releasing the rope keeps momentum, and upward release gets a bonus + hang', () => {
   const p = new PlayerController(CONFIG);
+  p.ropeStyle = 'swing';
   p.pos.set(0, 40, 0);
   p.fireHook('left', p.pos.clone(), anchorAt(0, 60, -10));
   for (let i = 0; i < 10; i++) p.update(1 / 60, idle(), world());
@@ -129,6 +131,7 @@ test('a rope much shorter than the distance does not teleport the player', () =>
 
 test('boost while hooked accelerates along the swing, not into the wall', () => {
   const p = new PlayerController(CONFIG);
+  p.ropeStyle = 'swing';
   p.pos.set(-20, 40, 0);
   p.fireHook('left', p.pos.clone(), anchorAt(0, 60, 0));
   for (let i = 0; i < 10; i++) p.update(1 / 60, idle(), world());
@@ -166,4 +169,37 @@ test('damage scales with speed and caps', () => {
   assert.equal(napeDamage(20, CONFIG), 40);
   assert.ok(napeDamage(45, CONFIG) >= CONFIG.strike.perfectDamage);
   assert.equal(napeDamage(200, CONFIG), CONFIG.strike.maxDamage);
+});
+
+test('pull style: rope pulls the player fast toward the anchor, then auto-releases', () => {
+  const p = new PlayerController(CONFIG);
+  assert.equal(p.ropeStyle, 'pull');
+  p.pos.set(0, 20, 50);
+  p.fireHook('right', p.pos.clone(), anchorAt(0, 40, 0));
+  let maxSpeed = 0;
+  let released = false;
+  let prev = p.pos.clone();
+  for (let i = 0; i < 180 && !released; i++) {
+    p.update(1 / 60, idle(), world());
+    maxSpeed = Math.max(maxSpeed, p.speed);
+    assert.ok(p.pos.distanceTo(prev) <= p.speed / 60 + 0.4, 'no teleport');
+    prev = p.pos.clone();
+    if (p.events.some((e) => e.type === 'arrive')) released = true;
+    p.events.length = 0;
+  }
+  assert.ok(maxSpeed > 35, `pulled fast: ${maxSpeed.toFixed(1)} m/s`);
+  assert.ok(released && !p.anyAttached, 'auto-released near the anchor');
+  assert.ok(p.vel.y > 10, `launched upward past the anchor, vy=${p.vel.y.toFixed(1)}`);
+});
+
+test('pull style: releasing while rising launches the player upward', () => {
+  const p = new PlayerController(CONFIG);
+  p.pos.set(0, 20, 30);
+  p.fireHook('left', p.pos.clone(), anchorAt(0, 60, 0));
+  for (let i = 0; i < 40; i++) p.update(1 / 60, idle(), world());
+  const vy = p.vel.y;
+  assert.ok(vy > 5);
+  p.releaseAll();
+  const P = CONFIG.hook.pull;
+  assert.ok(Math.abs(p.vel.y - (vy * (1 + P.launchBonus) + P.launchUp)) < 1e-6);
 });

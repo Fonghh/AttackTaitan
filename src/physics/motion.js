@@ -4,6 +4,7 @@ import { Vector3 } from 'three';
 
 const _n = new Vector3();
 let _lastImpact = 0; // 最近一次方塊碰撞損失的法向速度
+const _wallN = new Vector3(); // 撞牆時的牆面法線（水平）
 
 /**
  * 球體與 AABB 碰撞，把球推出並移除撞向表面的速度分量。
@@ -56,6 +57,18 @@ export function collideSphereAABB(pos, vel, r, box) {
   return _n;
 }
 
+/** 這個位置的球體是否與任何方塊重疊 */
+export function sphereOverlaps(pos, r, colliders) {
+  for (const { min, max } of colliders) {
+    const cx = Math.max(min.x, Math.min(pos.x, max.x));
+    const cy = Math.max(min.y, Math.min(pos.y, max.y));
+    const cz = Math.max(min.z, Math.min(pos.z, max.z));
+    const dx = pos.x - cx, dy = pos.y - cy, dz = pos.z - cz;
+    if (dx * dx + dy * dy + dz * dz < r * r) return true;
+  }
+  return false;
+}
+
 /** 球體 vs 球體（巨人身體），把玩家推出。回傳是否接觸。 */
 export function collideSphereSphere(pos, vel, r, center, cr) {
   _n.subVectors(pos, center);
@@ -90,7 +103,10 @@ export function resolveWorldCollisions(pos, vel, r, colliders, wallRadius) {
       if (n.y > 0.65) grounded = true;
       else {
         hitWall = true;
-        if (Math.abs(n.y) < 0.3) wallImpact = Math.max(wallImpact, _lastImpact);
+        if (Math.abs(n.y) < 0.3 && _lastImpact > wallImpact) {
+          wallImpact = _lastImpact;
+          _wallN.copy(n);
+        }
       }
     }
   }
@@ -108,7 +124,7 @@ export function resolveWorldCollisions(pos, vel, r, colliders, wallRadius) {
     }
     hitWall = true;
   }
-  return { grounded, hitWall, wallImpact };
+  return { grounded, hitWall, wallImpact, wallNormal: _wallN };
 }
 
 /**

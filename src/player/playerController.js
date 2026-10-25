@@ -7,6 +7,7 @@ import {
   collideSphereSphere,
   substepCount,
   softLimitSpeed,
+  sphereOverlaps,
 } from '../physics/motion.js';
 
 const _wish = new Vector3();
@@ -22,6 +23,7 @@ export class PlayerController {
     this.vel = new Vector3();
     this.hooks = { left: new Hook('left'), right: new Hook('right') };
     this.events = []; // 給音效／特效用的事件
+    this.ropeStyle = cfg.hook.style;
     this.reset();
   }
 
@@ -40,6 +42,11 @@ export class PlayerController {
     this.hangTimer = 0;
     this.invuln = 0;
     this.lunge = null; // { timer, target: () => Vector3 }
+    this.wallCarry = new Vector3(); // 撞牆損失的水平速度
+    this.wallCarryTimer = 0;
+    this.carry = new Vector3(); // 放索後等待歸還的水平速度
+    this.carryTimer = 0;
+    this.pullReleaseTimer = 0;
     this.maxSpeed = 0;
     this.airTime = 0;
     this.hooks.left.reset();
@@ -89,7 +96,18 @@ export class PlayerController {
   _onFullRelease() {
     const f = this.cfg.fling;
     if (!this.grounded && this.vel.y > f.minUpVel) {
-      this.vel.y *= 1 + f.releaseBonus;
+      if (this.ropeStyle === 'pull') {
+        // 拉索放開：往上衝（像衝過牆頂那樣）
+        const P = this.cfg.hook.pull;
+        this.vel.y = this.vel.y * (1 + P.launchBonus) + P.launchUp;
+        if (this.wallCarryTimer > 0) {
+          this.carry.copy(this.wallCarry).multiplyScalar(P.wallCarry);
+          this.carryTimer = 2.0;
+        }
+        this.pullReleaseTimer = 0.5;
+      } else {
+        this.vel.y *= 1 + f.releaseBonus;
+      }
       this.hangArmed = true;
       this.hangArmTimer = f.armWindow;
       this.emit('fling', {});
@@ -137,7 +155,10 @@ export class PlayerController {
     if (_wish.lengthSq() > 1) _wish.normalize();
 
     const attached = this.anyAttached;
-    this.reeling = attached ? intent.reel : 0; // 只有 Space（電腦）會捲收
+    // 拉索模式：勾住就一直被拉；擺盪模式：只有 Space 捲收
+    const pulling = attached && this.ropeStyle === 'pull' && !this.lunge;
+    this.pulling = pulling;
+    this.reeling = pulling ? 1 : attached ? intent.reel : 0;
 
     // 加速（消耗氣體）
     this.boosting = false;
@@ -200,7 +221,7 @@ export class PlayerController {
 
     for (let i = 0; i < n; i++) {
       if (!this.lunge) {
-        const gScale = this.hangTimer > 0 ? cfg.fling.hangGravityScale : 1;
+        const gScale = pulling ? cfg.hook.pull.gravityScale : this.hangTimer > 0 ? cfg.fling.hangGravityScale : 1;
         this.vel.y -= cfg.gravity * gScale * h;
 
         if (this.grounded && !(attached && this.reeling > 0)) {
@@ -256,8 +277,19 @@ export class PlayerController {
         }
       }
       // 勾住時撞牆：把撞擊速度轉成沿牆往上衝（像跑上牆面），放索後就能翻上屋頂
-      if (attached && !this.lunge && res.wallImpact > 4) {
-        this.vel.y = Math.max(this.vel.y, 0) + res.wallImpact * cfg.hook.wallRunUp;
+      if ((attached || this.pullReleaseTimer > 0) && !this.lunge && res.wallImpact > 4) {
+        // 記住撞進牆裡的水平速度，翻過牆頂後還給角色（衝過牆頂繼續往前飛）
+        const lost = _tmp.copy(res.wallNormal).multiplyScalar(-res.wallImpact);
+        lost.y = 0;
+        if (attached) {
+          this.vel.y = Math.max(this.vel.y, 0) + res.wallImpact * cfg.hook.wallRunUp;
+          if (lost.length() > this.wallCarry.length()) this.wallCarry.copy(lost);
+          this.wallCarryTimer = 0.6;
+        } else if (lost.length() * cfg.hook.pull.wallCarry > this.carry.length() || this.carryTimer <= 0) {
+          // 剛放索就撞牆：直接記下，翻過牆頂後歸還
+          this.carry.copy(lost).multiplyScalar(cfg.hook.pull.wallCarry);
+          this.carryTimer = 2.0;
+        }
         this.emit('wallRun', { speed: res.wallImpact });
       }
       grounded = grounded || res.grounded;
@@ -265,6 +297,22 @@ export class PlayerController {
       this.grounded = res.grounded;
     }
     this.grounded = grounded;
+
+    // 拉索：快到勾點時自動放開，靠慣性衝過頭
+    if (pulling) {
+      for (const side of ['left', 'right']) {
+        const hk = this.hooks[side];
+        if (!hk.attached) continue;
+        hk.anchor(_anchor);
+        const d = this.pos.distanceTo(_anchor);
+        _tmp.subVectors(_anchor, this.pos);
+        const passed = d < 12 && this.vel.dot(_tmp) < 0; // 已經衝過勾點
+        if (d < Math.max(cfg.hook.pull.arriveDist, this.speed * 0.07) || passed) {
+          this.emit('arrive', { side });
+          this.releaseHook(side);
+        }
+      }
+    }
 
     // 落地判定 → 滑行
     if (this.grounded && !wasGrounded) {
@@ -277,6 +325,26 @@ export class PlayerController {
     if (!this.grounded) {
       this.airTime += dt;
       this.sliding = false;
+    }
+
+    // 撞牆速度的記憶與歸還：離開牆面（翻過牆頂）時把水平速度還回去
+    if (this.pullReleaseTimer > 0) this.pullReleaseTimer -= dt;
+    if (this.wallCarryTimer > 0) {
+      this.wallCarryTimer -= dt;
+      if (this.wallCarryTimer <= 0) this.wallCarry.set(0, 0, 0);
+    }
+    if (this.carryTimer > 0) {
+      this.carryTimer -= dt;
+      if (this.grounded || this.anyAttached || this.carryTimer <= 0) {
+        this.carryTimer = 0;
+    this.pullReleaseTimer = 0;
+      } else if (!sphereOverlaps(_tmp.copy(this.carry).normalize().multiplyScalar(1.5).add(this.pos), P.radius, world.colliders)) {
+        // 前方 1.5m 已經沒有牆（翻過牆頂了）
+        this.vel.add(this.carry);
+        this.carryTimer = 0;
+    this.pullReleaseTimer = 0;
+        this.emit('vault', {});
+      }
     }
 
     softLimitSpeed(this.vel, P.maxSpeed, P.softLimitRate, dt);
@@ -298,6 +366,16 @@ export class PlayerController {
       const dist = _anchor.length();
       if (dist < 1e-3) continue;
       _anchor.multiplyScalar(1 / dist); // 指向勾點的單位向量
+      if (this.pulling) {
+        // 拉索：朝勾點加速到 maxSpeed，切線速度保留 → 帶著原本的慣性畫出弧線
+        const along = this.vel.dot(_anchor);
+        const room = H.pull.maxSpeed - along;
+        if (room > 0) this.vel.addScaledVector(_anchor, Math.min(H.pull.accel * h, room));
+        // 側向速度慢慢收斂，路線最後會對準勾點（但保留一段弧線）
+        _tmp.copy(this.vel).addScaledVector(_anchor, -this.vel.dot(_anchor));
+        this.vel.addScaledVector(_tmp, -Math.min(1, H.pull.sideDamp * h));
+        continue;
+      }
       if (this.reeling > 0 && dist > H.minLength) {
         this.vel.addScaledVector(_anchor, H.reelAccel * this.reeling * h);
       }

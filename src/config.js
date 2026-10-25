@@ -27,6 +27,21 @@ export const CONFIG = {
 
   hook: {
     range: 85,
+    // 鋼索手感：'pull' = 拉索（勾住後被強力拉向勾點，快到時自動放開往上衝；預設）
+    //           'swing' = 擺盪（鐘擺式，往上甩時放開）
+    style: 'pull',
+    pull: {
+      accel: 58, // 朝勾點的拉力（m/s²）
+      maxSpeed: 50, // 拉索時朝勾點方向的最高速度
+      gravityScale: 0.35, // 拉索期間的重力比例（拉力為主）
+      sideDamp: 1.6, // 側向速度每秒收斂比例
+      arriveDist: 4, // 離勾點這麼近時自動放開 → 慣性衝過頭
+      launchBonus: 0.25, // 放開時向上速度 ×(1+此值)
+      launchUp: 7, // 放開時額外的向上速度（m/s）
+      wallCarry: 0.7, // 撞牆損失的水平速度，翻過牆頂後還回這個比例
+      aimAssistDeg: 5, // 準星沒打中時，在這個角度內找最近的勾點
+      aimAssistDegTouch: 8,
+    },
     travelSpeed: 260, // 鉤爪飛行速度（視覺 + 命中延遲）
     aimOffsetDeg: 10, // 雙索模式：左右鋼索相對準星的偏角
     initialSlack: 1.0, // 勾住瞬間的繩長 = 距離 × 此值（1 = 不會瞬間拉動位置）

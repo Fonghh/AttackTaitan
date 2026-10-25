@@ -165,6 +165,31 @@ export class HookAimer {
     return best ? { ...best.hit, assisted: best.assisted } : null;
   }
 
+  /**
+   * 準星直指：打中哪裡就勾哪裡；沒打中時在 assistDeg 內找最接近準星的勾點。
+   */
+  aimDirect(camera, forward, playerPos, range, assistDeg) {
+    const camPos = camera.position;
+    const near = Math.max(0, camPos.distanceTo(playerPos) - 1.5);
+    const direct = this._cast(camPos, forward, playerPos, near, range);
+    if (direct) return { ...direct, assisted: false };
+    this._right.crossVectors(forward, _up);
+    if (this._right.lengthSq() < 1e-6) this._right.set(1, 0, 0);
+    this._right.normalize();
+    for (const ang of [assistDeg * 0.5, assistDeg]) {
+      for (let k = 0; k < 8; k++) {
+        const d = this._dir.copy(forward);
+        _q.setFromAxisAngle(this._right, (ang * Math.PI) / 180);
+        d.applyQuaternion(_q);
+        _q.setFromAxisAngle(forward, (k / 8) * Math.PI * 2);
+        d.applyQuaternion(_q).normalize();
+        const hit = this._cast(camPos, d, playerPos, near, range);
+        if (hit) return { ...hit, assisted: true };
+      }
+    }
+    return null;
+  }
+
   _cast(origin, dir, playerPos, near, range) {
     this.ray.set(origin, dir);
     this.ray.near = near;

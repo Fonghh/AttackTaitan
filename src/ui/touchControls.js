@@ -18,7 +18,7 @@ export class TouchControls {
       <button class="tbtn t-hookL" data-hold="left">左鉤</button>
       <button class="tbtn t-hookR" data-hold="right">右鉤</button>
       <button class="tbtn t-strike" data-act="strike">斬擊</button>
-      <div class="t-hint">按住「鋼索」擺盪，往上甩時放開。左下拖曳＝移動，空白處拖曳＝轉視角</div>`;
+      <div class="t-hint">按住「鋼索」被拉過去，往上衝時放開。左下拖曳＝移動，空白處拖曳＝轉視角</div>`;
     this.base = root.querySelector('.joy-base');
     this.knob = root.querySelector('.joy-knob');
     this.btn = {

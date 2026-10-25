@@ -71,7 +71,8 @@ try {
     // 1) 往巨人方向跑下塔頂
     for (let i = 0; i < 60; i++) step({ ...base(), move: { x: 0, y: 1 } });
     // 2) 視角略為朝上，射出鋼索
-    // 新手操作：不調整視角，直接朝巨人方向按住鋼索（擺盪輔助會挑街邊高處的勾點）
+    // 擺盪模式：不調整視角，直接朝巨人方向按住鋼索（擺盪輔助會挑街邊高處的勾點）
+    g.pc.ropeStyle = 'swing';
     g.rig.pitch = 0.05;
     for (let i = 0; i < 3; i++) step();
     const aimBefore = !!g.aims.auto;
@@ -109,7 +110,7 @@ try {
     for (let i = 0; i < 30; i++) step();
     return { aimBefore, ...log, swing2, speedAfterRelease, pos: g.pc.pos.toArray().map((v) => +v.toFixed(1)) };
   });
-  check('hook aim finds a target from the spawn tower (default view)', sim.aimBefore);
+  check('[swing] hook aim finds a target from the spawn tower (default view)', sim.aimBefore);
   check('no teleport during swing', sim.maxJump < 0.3, `max extra move ${sim.maxJump.toFixed(2)}m/frame`);
   check('swing goes down then back up (real pendulum)', sim.attached && sim.swingMinY > 3, `release height ${sim.swingMinY.toFixed(1)}m`);
   check('second hook in mid-air attaches (chained swing)', sim.swing2);
@@ -122,6 +123,45 @@ try {
 
   await page.evaluate(() => window.__game.renderer.render(window.__game.scene, window.__game.camera));
   await page.screenshot({ path: `${OUT}/02-after-swing.png` });
+
+  // 拉索模式（預設）：勾住被拉過去 → 到勾點自動放開往上衝 → 翻過屋頂繼續往前飛
+  const pull = await page.evaluate(() => {
+    const g = window.__game;
+    g.restart(true);
+    g.renderer.setAnimationLoop(null);
+    g.pc.ropeStyle = 'pull';
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    const run = (it) => { for (const e of it.events) g._handleEvent(e); g.step(1 / 60, it); };
+    for (let i = 0; i < 50; i++) run({ ...base(), move: { x: 0, y: 1 } });
+    g.rig.pitch = 0.35;
+    g.rig.yaw -= 0.12;
+    for (let i = 0; i < 3; i++) run(base());
+    const anchorY = g.aims.auto && g.aims.auto.point.y;
+    const ev = new Set();
+    const orig = g._onPlayerEvent.bind(g);
+    g._onPlayerEvent = (e) => (ev.add(e.type), orig(e));
+    run({ ...base(), events: ['down:left'] });
+    let maxPull = 0, maxY = 0, prev = g.pc.pos.clone(), maxJump = 0;
+    const start = g.pc.pos.clone();
+    for (let i = 0; i < 240; i++) {
+      run(base());
+      if (g.pc.anyAttached) maxPull = Math.max(maxPull, g.pc.speed);
+      maxY = Math.max(maxY, g.pc.pos.y);
+      maxJump = Math.max(maxJump, g.pc.pos.distanceTo(prev) - g.pc.speed / 60);
+      prev = g.pc.pos.clone();
+    }
+    run({ ...base(), events: ['up:left'] });
+    g._onPlayerEvent = orig;
+    const travel = Math.hypot(g.pc.pos.x - start.x, g.pc.pos.z - start.z);
+    return { anchorY, maxPull, maxY, maxJump, travel, events: [...ev], strikes: g.stats.strikes };
+  });
+  check('[pull] rope pulls the player fast toward the anchor', pull.maxPull > 40, `${pull.maxPull.toFixed(1)} m/s`);
+  check('[pull] auto-release near the anchor launches upward', pull.events.includes('arrive') && pull.events.includes('fling'), pull.events.join(','));
+  check('[pull] flies over the roof and keeps going', pull.events.includes('vault') && pull.maxY > pull.anchorY + 15 && pull.travel > 80, `peak ${pull.maxY.toFixed(0)}m (anchor ${pull.anchorY.toFixed(0)}m), travel ${pull.travel.toFixed(0)}m`);
+  check('[pull] no teleport', pull.maxJump < 0.3, `${pull.maxJump.toFixed(2)}m`);
+  check('pressing the rope does not trigger a strike', pull.strikes === 0, `strikes=${pull.strikes}`);
+  await page.evaluate(() => window.__game.renderer.render(window.__game.scene, window.__game.camera));
+  await page.screenshot({ path: `${OUT}/02b-after-pull.png` });
 
   // 4) 高速從巨人背後接近並斬擊
   const fight = await page.evaluate(() => {

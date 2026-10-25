@@ -17,6 +17,7 @@ import { Audio } from '../audio/audio.js';
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _right = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
 
 export class Game {
   constructor(container) {
@@ -64,6 +65,7 @@ export class Game {
     // 鋼索模式：single = 單索（按住擺盪，預設）、dual = 左右雙索（進階）
     this.hookMode = this._load('hookMode2', 'single');
     this.cameraFollow = this._load('cameraFollow', 'on') === 'on';
+    this.pc.ropeStyle = this._load('ropeStyle', cfg.hook.style);
     this.touchUI.setMode(this.hookMode);
     this.held = { auto: false, left: false, right: false };
     this.pendingFire = { auto: false, left: false, right: false };
@@ -98,6 +100,13 @@ export class Game {
       this._releaseHeld();
       this._syncModeLabel();
     });
+    $('btn-style').addEventListener('click', () => {
+      this.pc.releaseAll();
+      this._releaseHeld();
+      this.pc.ropeStyle = this.pc.ropeStyle === 'pull' ? 'swing' : 'pull';
+      this._save('ropeStyle', this.pc.ropeStyle);
+      this._syncModeLabel();
+    });
     $('btn-follow').addEventListener('click', () => {
       this.cameraFollow = !this.cameraFollow;
       this._save('cameraFollow', this.cameraFollow ? 'on' : 'off');
@@ -116,6 +125,7 @@ export class Game {
 
   _syncModeLabel() {
     document.getElementById('btn-mode').textContent = this.hookMode === 'single' ? '鋼索：單索（按住擺盪）' : '鋼索：左右雙索（進階）';
+    document.getElementById('btn-style').textContent = this.pc.ropeStyle === 'pull' ? '鋼索手感：拉索（勾住被拉過去）' : '鋼索手感：擺盪（鐘擺）';
     document.getElementById('btn-follow').textContent = this.cameraFollow ? '鏡頭跟隨飛行方向：開' : '鏡頭跟隨飛行方向：關';
     document.body.classList.toggle('dual', this.hookMode === 'dual');
   }
@@ -296,6 +306,7 @@ export class Game {
           if (kind === 'down') this._hookDown(key);
           else this._hookUp(key);
         }
+        break;
       case 'strike':
         this._strike();
         break;
@@ -500,9 +511,19 @@ export class Game {
     const H = this.cfg.hook;
     const f = this.rig.forward;
     const p = this.pc.pos;
+    // 拉索：準星指哪勾哪（小範圍輔助）；擺盪：擺盪輔助瞄準
+    const assist = this.touch ? H.pull.aimAssistDegTouch : H.pull.aimAssistDeg;
+    const aimAt = (yawOff) => {
+      if (this.pc.ropeStyle === 'pull') {
+        let d = f;
+        if (yawOff) d = _v2.copy(f).applyAxisAngle(_up, (yawOff * Math.PI) / 180);
+        return this.aimer.aimDirect(this.camera, d, p, H.range, assist);
+      }
+      return this.aimer.aim(this.camera, f, p, yawOff, H.range, H.swingAim);
+    };
     if (this.hookMode === 'single') {
       this.aims.left = this.aims.right = null;
-      const a = (this.aims.auto = this.aimer.aim(this.camera, f, p, 0, H.range, H.swingAim));
+      const a = (this.aims.auto = aimAt(0));
       if (a) {
         // 勾點在左邊就用左發射器，右邊用右發射器
         _right.set(-f.z, 0, f.x).normalize();
@@ -510,8 +531,8 @@ export class Game {
       }
     } else {
       this.aims.auto = null;
-      this.aims.left = this.aimer.aim(this.camera, f, p, H.aimOffsetDeg, H.range, H.swingAim);
-      this.aims.right = this.aimer.aim(this.camera, f, p, -H.aimOffsetDeg, H.range, H.swingAim);
+      this.aims.left = aimAt(H.aimOffsetDeg);
+      this.aims.right = aimAt(-H.aimOffsetDeg);
     }
   }
 
@@ -534,6 +555,16 @@ export class Game {
         break;
       case 'fling':
         this.audio.play('fling');
+        if (this.pc.ropeStyle === 'pull') {
+          this.rig.addShake(0.12);
+          this.fx.gasPuff(this.pc.pos, this.pc.vel, true);
+        }
+        break;
+      case 'arrive':
+        this.audio.play('hookRelease');
+        break;
+      case 'wallRun':
+        this.fx.dust(this.pc.pos, this.pc.vel, 4);
         break;
       case 'jump':
         this.audio.play('jump');
