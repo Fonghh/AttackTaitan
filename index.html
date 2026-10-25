@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="description" content="立體機動高速斬擊：用雙側鋼索在高樓間擺盪，高速斬擊巨人後頸弱點的 3D 動作遊戲原型。" />
+    <meta name="theme-color" content="#11151b" />
+    <title>立體機動斬擊</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="vignette"></div>
+    <div id="flash"></div>
+    <div id="hurt"></div>
+    <div id="fatal" hidden></div>
+
+    <div id="hud">
+      <div id="titan-bar">
+        <div class="label">巨人 <span id="titan-hp-text"></span></div>
+        <div class="bar"><div id="titan-hp-fill"></div></div>
+      </div>
+      <div id="mission"></div>
+
+      <div id="stats">
+        <div class="speed"><span id="speed-val">0</span><small>m/s</small><em id="speed-kmh">0 km/h</em></div>
+        <div class="bar thin"><div id="speed-bar"></div></div>
+        <div class="row"><label>氣體</label><div class="bar"><div id="gas-fill"></div></div></div>
+        <div class="row"><label>生命</label><div class="bar"><div id="hp-fill"></div></div></div>
+        <div class="row ropes"><label>鋼索</label><span id="rope-l" class="rope">L</span><span id="rope-r" class="rope">R</span><span id="hang-ind">滯空</span></div>
+      </div>
+
+      <div id="crosshair"><i></i><i></i><i></i><i></i></div>
+      <div id="mark-l" class="aim-mark" data-label="L"></div>
+      <div id="mark-r" class="aim-mark" data-label="R"></div>
+      <div id="mark-s" class="aim-mark hidden" data-label="R"></div>
+
+      <div id="nape-marker" class="nape" hidden><div class="ring"></div><span id="nape-dist"></span><b class="go">斬！</b></div>
+      <div id="nape-arrow" hidden></div>
+      <div id="strike-checks" hidden><span id="chk-dist"></span><span id="chk-speed"></span><span id="chk-angle"></span></div>
+
+      <div id="toast"></div>
+      <div id="popups"></div>
+
+      <div id="help">
+        <button id="btn-help" aria-label="操作說明">?</button>
+        <div class="help-body">
+          <h3>操作（鍵盤＋滑鼠）</h3>
+          <ul>
+            <li><b>滑鼠</b> 視角／瞄準</li>
+            <li><b>左鍵按住</b> 左鋼索（放開＝解除）</li>
+            <li><b>右鍵按住</b> 右鋼索（放開＝解除）</li>
+            <li><b>WASD</b> 跑步／空中轉向，勾住時 W＝弱捲收</li>
+            <li><b>Space</b> 跳躍；勾住時強捲收；空中噴氣上升</li>
+            <li><b>Shift</b> 加速（耗氣體）</li>
+            <li><b>E / F</b> 斬擊　<b>Q</b> 解除全部鋼索</li>
+            <li><b>R</b> 重新開始　<b>Esc</b> 暫停　<b>H</b> 說明</li>
+          </ul>
+          <h3>手機</h3>
+          <ul>
+            <li>左下拖曳＝搖桿；勾住時往前推＝捲收</li>
+            <li>空白處拖曳＝轉視角（放手後自動跟隨飛行方向）</li>
+            <li>右上 加速、右下 斬擊；鋼索鈕點一下勾、長按解除</li>
+          </ul>
+          <h3>斬擊條件</h3>
+          <p>距後頸 ≤ 7m、速度 ≥ 20 m/s、從後方或側面接近。差一點時按斬擊會自動衝刺。速度越快傷害越高。</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="touch" hidden></div>
+
+    <section id="start" class="panel">
+      <h1>立體機動<span>高速斬擊</span></h1>
+      <p class="sub">射出鋼索、在高樓之間擺盪、累積速度，從背後斬斷巨人的後頸。</p>
+      <ol class="steps">
+        <li>按住<b>左／右鍵</b>（手機：<b>鋼索</b>）勾住建築開始擺盪</li>
+        <li>往上甩時<b>放開</b>，保留慣性飛向下一棟樓</li>
+        <li><b>Shift／加速</b>噴氣提速，繞到巨人<b>後方</b></li>
+        <li>準星旁的弱點標記變<b>綠</b>時按 <b>E／斬擊</b></li>
+      </ol>
+      <button id="btn-start" class="primary">開始遊戲</button>
+      <p class="hint desktop-only">開始後滑鼠會鎖定在畫面中，按 Esc 暫停。</p>
+    </section>
+
+    <section id="pause" class="panel" hidden>
+      <h2>暫停</h2>
+      <button id="btn-resume" class="primary">繼續</button>
+      <button data-restart>重新開始</button>
+      <button id="btn-mode">鋼索按鈕：智慧單鉤</button>
+      <button id="btn-mute">音效：開</button>
+    </section>
+
+    <section id="result" class="panel" hidden>
+      <h2 id="result-title">討伐成功</h2>
+      <div id="result-body"></div>
+      <button data-restart class="primary">再來一次</button>
+    </section>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
