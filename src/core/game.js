@@ -269,6 +269,7 @@ export class Game {
     this.chroma = 0;
     this.flickTurn = null;
     this.passThrough = 0;
+    this.strikeHold = null;
     this._updateMission();
     if (play) {
       this.state = 'playing';
@@ -378,7 +379,14 @@ export class Game {
         break;
       case 'strike':
         if (this.grab) this._struggle();
+        else if (this._leviSide()) this.strikeHold = { t: 0 }; // 勾住時：放開前看是短按還是長按（兵長斬）
         else this._strike();
+        break;
+      case 'strikeUp':
+        if (this.strikeHold) {
+          this.strikeHold = null;
+          this._strike();
+        }
         break;
     }
   }
@@ -477,6 +485,100 @@ export class Game {
       this.hud.toast('正面無法斬擊後頸！繞到後方，或砍眼睛、腳', 'warn', 1.4);
     } else if (ev.inRange && !ev.fastEnough) {
       this.hud.toast(`速度不足（需 ${(this.cfg.strike.minSpeed * this.pc.speedScale).toFixed(0)} m/s）`, 'warn', 1.2);
+    }
+  }
+
+  /** 可以發動兵長斬的鋼索（勾住中，優先勾在巨人身上的那條）；沒有則 null */
+  _leviSide() {
+    const pc = this.pc;
+    if (pc.busy || this.grab) return null;
+    let side = null;
+    for (const s of ['left', 'right']) {
+      const h = pc.hooks[s];
+      if (!h.attached) continue;
+      if (h.object && h.object.userData.titan) return s;
+      side = side || s;
+    }
+    return side;
+  }
+
+  /** 長按斬擊（勾住時）：處理短按／長按判定 */
+  _updateStrikeHold(realDt) {
+    const hold = this.strikeHold;
+    if (!hold) return;
+    const side = this._leviSide();
+    if (!side) {
+      // 鋼索在按住期間被解除：當成一般斬擊
+      this.strikeHold = null;
+      this._strike();
+      return;
+    }
+    hold.t += realDt;
+    if (hold.t < this.cfg.strike.leviHold) return;
+    this.strikeHold = null;
+    if (this.pc.startLevi(side)) {
+      this.leviTitan = this.pc.hooks[side].object?.userData.titan || null;
+      this.audio.play('ready');
+      this.rig.kick(-5); // 短拍：鏡頭先往內收
+      this.hud.popup(innerWidth / 2, innerHeight * 0.38, '兵長斬', 'perfect');
+    }
+  }
+
+  /** 兵長斬抵達：依勾點位置判定後頸／眼睛／腳／身體，命中後鋼索自動解除 */
+  _leviFinish() {
+    const pc = this.pc;
+    const C = this.cfg.strike;
+    const titan = this.leviTitan;
+    pc.levi = null;
+    this.leviTitan = null;
+    this.stats.strikes++;
+    this.model.startSpin();
+    this.fx.spinRing(pc.pos, '#ff7ab8');
+    this.audio.play('slash');
+    this.audio.play('swing');
+    let legCut = false;
+    if (titan && titan.alive) {
+      this.titan = titan;
+      const range = C.leviRange * titan.scale;
+      const ev = this._evaluate();
+      // 勾在哪就砍哪：取離角色最近的部位（後頸／眼睛／腳踝）
+      const p = pc.pos;
+      const eye = Math.min(titan.eyeWorld(0, _v).distanceTo(p), titan.eyeWorld(1, _v).distanceTo(p));
+      const ankle = Math.min(titan.ankleWorld('L', _v).distanceTo(p), titan.ankleWorld('R', _v).distanceTo(p));
+      const kneel = titan.kneelTimer;
+      if (ev.dist <= range && ev.dist <= eye && ev.dist <= ankle) {
+        ev.damage = Math.round(Math.min(C.maxDamage, napeDamage(Math.max(ev.speed, C.minSpeed), this.cfg) * C.leviDamageBonus));
+        this._napeHit(ev, true, '兵長斬！');
+      } else if (!this._partHit(range * 0.7, true)) {
+        this._bodyHit(range * 0.5);
+      }
+      legCut = titan.kneelTimer > kneel; // 砍到腳：交給「滑到背後」處理速度
+    } else {
+      this.rig.addShake(0.3);
+    }
+    // 鋼索自動解除，帶著慣性往上彈出去（可穿過巨人身體一下）
+    pc.releaseAll();
+    if (legCut) return;
+    pc.vel.multiplyScalar(0.7);
+    pc.vel.y = Math.max(pc.vel.y, 0) + C.leviPop * Math.max(0.6, pc.speedScale);
+    this.passThrough = Math.max(this.passThrough, 0.6);
+  }
+
+  /** 地面滑鏟經過巨人腳踝：自動砍腳 */
+  _groundDashCut() {
+    const pc = this.pc;
+    if (pc.groundDashTimer <= 0 || this.strikeCooldown > 0) return;
+    const T = this.cfg.titan;
+    for (const t of this.titans) {
+      if (!t.alive || t.kneelTimer > 0) continue;
+      const r = T.partRange * t.scale * this.cfg.strike.groundSpinRange;
+      if (t.ankleWorld('L', _v).distanceTo(pc.pos) < r || t.ankleWorld('R', _v).distanceTo(pc.pos) < r) {
+        this.strikeCooldown = this.cfg.strike.cooldown;
+        this.stats.strikes++;
+        this.audio.play('slash');
+        this._spinAttack(t, true);
+        return;
+      }
     }
   }
 
@@ -598,7 +700,7 @@ export class Game {
     return false;
   }
 
-  _napeHit(ev, spin = false) {
+  _napeHit(ev, spin = false, label = null) {
     const C = this.cfg.strike;
     const titan = this.titan;
     const dmg = ev.damage;
@@ -621,7 +723,7 @@ export class Game {
     this.hud.flash(perfect ? 'rgba(255,225,180,0.5)' : 'rgba(255,255,255,0.3)');
     // 不顯示傷害數字，只用一個字強調
     const sp = this.hud.project(this.napePos, this.camera, {});
-    this.hud.popup(sp.x, sp.y - 20, spin ? '迴旋斬！' : perfect ? '完美斬擊！' : '斬！', perfect ? 'perfect' : 'crit');
+    this.hud.popup(sp.x, sp.y - 20, label || (spin ? '迴旋斬！' : perfect ? '完美斬擊！' : '斬！'), perfect ? 'perfect' : 'crit');
     this.pc.vel.y = Math.max(this.pc.vel.y, 0) + 5; // 斬過後微微上彈
     if (!titan.alive) this._onKill(titan);
   }
@@ -686,7 +788,7 @@ export class Game {
 
   /** 色差（紅藍錯位）：命中與衝刺斬的瞬間 */
   _updateChroma(dt) {
-    if (this.pc.lunge) this.chroma = Math.max(this.chroma, 0.35);
+    if (this.pc.lunge || this.pc.levi?.phase === 'dash') this.chroma = Math.max(this.chroma, 0.4);
     this.chroma = Math.max(0, (this.chroma || 0) - dt * 1.6);
     const c = this.renderer.domElement;
     const px = (this.chroma * 9).toFixed(1);
@@ -698,8 +800,8 @@ export class Game {
   _updateSpeedBurst(dt) {
     const pc = this.pc;
     let target = 0;
-    if (pc.lunge) target = 1;
-    else if (pc.dashing) target = 0.55;
+    if (pc.lunge || pc.levi?.phase === 'dash') target = 1;
+    else if (pc.dashGlow > 0) target = 0.15 + 0.45 * pc.dashGlow; // 衝刺越久越強，放開後慢慢退
     else if (pc.feelSpeed > 45) target = Math.min(0.35, (pc.feelSpeed - 45) / 40);
     this.burst = Math.max(target, (this.burst || 0) - dt * 2.5);
     const el = this.speedBurstEl || (this.speedBurstEl = document.getElementById('speedburst'));
@@ -731,6 +833,7 @@ export class Game {
       dt *= this.cfg.strike.slowMoScale + (1 - this.cfg.strike.slowMoScale) * k * k;
     }
     this._updateSpeedBurst(realDt);
+    if (this.state === 'playing') this._updateStrikeHold(realDt);
 
     if (this.state === 'playing' || this.state === 'won' || this.state === 'lost') {
       this.step(dt, intent);
@@ -767,7 +870,7 @@ export class Game {
     pc.update(dt, intent, {
       colliders: this.city.colliders,
       wallRadius: this.cfg.world.wallRadius,
-      titanSpheres: pc.lunge || this.grab || this.passThrough > 0 ? null : this.titanSpheres,
+      titanSpheres: pc.busy || this.grab || this.passThrough > 0 || pc.groundDashTimer > 0 ? null : this.titanSpheres,
       camYaw: this.rig.yaw,
       camForward: this.rig.forward,
     });
@@ -778,6 +881,11 @@ export class Game {
       this.grab.titan.grabHandWorld(pc.pos);
       pc.vel.set(0, 0, 0);
     }
+
+    // 兵長斬抵達／地面滑鏟砍腳
+    if (pc.levi && pc.levi.done) this._leviFinish();
+    if (!pc.levi) this.leviTitan = null;
+    this._groundDashCut();
 
     // 衝刺斬抵達
     if (pc.lunge && pc.lunge.done) {
@@ -827,7 +935,7 @@ export class Game {
       autoFollow: this.cameraFollow,
       followYaw: hookFollow ? this.model.yaw : null,
       lowAngle: this.lowAngle,
-      close: !!(pc.lunge || pc.dashing), // 衝刺時鏡頭拉近
+      close: !!(pc.lunge || pc.levi || pc.dashGlow > 0.35), // 衝刺時鏡頭拉近（放開後跟著速度感慢慢退）
       realDt: this.realDt,
     });
     this.model.update(dt, pc, this.rig.yaw);
@@ -845,8 +953,11 @@ export class Game {
     this.fx.update(dt, pc, this.model, this.camera);
     if (pc.boosting || pc.dashing) this.fx.gasPuff(pc.pos, pc.vel, true);
     if (pc.lunge) this.fx.trail(pc.pos);
+    if (pc.levi) this.fx.leviTrail(pc.pos, pc.levi.phase === 'dash');
+    this.model.setLevi(pc.levi ? (pc.levi.phase === 'dash' ? 2 : 1) : 0, pc.vel);
+    this.fx.setBladeTint(!!pc.levi);
     if (pc.sliding) this.fx.dust(pc.pos, pc.vel, 1);
-    this.fx.updateBlades(this.model, pc.feelSpeed, this.model.slashTimer > 0 || this.model.spinTimer > 0);
+    this.fx.updateBlades(this.model, pc.feelSpeed, this.model.slashTimer > 0 || this.model.spinTimer > 0 || !!pc.levi);
     for (const t of this.titans) {
       if (t.gone) continue;
       if (!t.alive) {
@@ -962,6 +1073,22 @@ export class Game {
         break;
       case 'dash':
         this.audio.play('boost');
+        break;
+      case 'groundDash':
+        this.audio.play('boost');
+        this.passThrough = Math.max(this.passThrough, this.cfg.dash.groundTime);
+        this.fx.dust(this.pc.pos, this.pc.vel, 10);
+        this.rig.kick(5);
+        break;
+      case 'leviWindup':
+        this.fx.leviCharge(this.pc.pos);
+        break;
+      case 'leviDash':
+        this.audio.play('boost');
+        this.rig.kick(12);
+        this.rig.addShake(0.35);
+        this.chroma = 0.55;
+        this.burst = 1;
         break;
       case 'dashArrive':
         this.audio.play('fling');

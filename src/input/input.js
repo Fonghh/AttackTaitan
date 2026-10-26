@@ -28,9 +28,13 @@ export class Input {
       if (map[e.code]) this.queue.push(map[e.code]);
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
     });
-    addEventListener('keyup', (e) => this.keys.delete(e.code));
+    addEventListener('keyup', (e) => {
+      this.keys.delete(e.code);
+      if (e.code === 'KeyE' || e.code === 'KeyF') this.queue.push('strikeUp'); // 長按斬擊（兵長斬）的放開
+    });
     addEventListener('blur', () => {
       this.keys.clear();
+      this.queue.push('strikeUp');
       if (this.mouse.left) this.queue.push('up:left');
       if (this.mouse.right) this.queue.push('up:right');
       this.mouse.left = this.mouse.right = false;

@@ -46,6 +46,13 @@ export class PlayerController {
     this.hangTimer = 0;
     this.invuln = 0;
     this.lunge = null; // { timer, target: () => Vector3 }
+    this.levi = null; // 兵長斬 { phase: 'windup'|'dash', t, side, done }
+    this.dashing = false;
+    this.dashHeld = 0; // 衝刺累積時間（氮氣式漸進加速）
+    this.dashRamp = 0; // 目前衝刺力道比例
+    this.dashGlow = 0; // 衝刺的速度感（放開後慢慢退，給鏡頭與特效用）
+    this.capBoost = 0; // 放開衝刺後保留的最高速度上限（慢慢降）
+    this.groundDashTimer = 0;
     this.wallCarry = new Vector3(); // 撞牆損失的水平速度
     this.wallCarryTimer = 0;
     this.carry = new Vector3(); // 放索後等待歸還的水平速度
@@ -70,6 +77,11 @@ export class PlayerController {
   /** 是否有鋼索處於「衝刺後放鬆」狀態 */
   get anySlack() {
     return (this.hooks.left.attached && this.hooks.left.slack) || (this.hooks.right.attached && this.hooks.right.slack);
+  }
+
+  /** 衝刺斬／兵長斬期間：角色由招式控制，不受一般物理影響 */
+  get busy() {
+    return !!(this.lunge || this.levi);
   }
 
   get anyAttached() {
@@ -173,8 +185,14 @@ export class PlayerController {
 
     const attached = this.anyAttached;
     // 衝刺：鉤住時按住衝刺鍵＝快速捲收鋼索
-    const dashing = attached && intent.boost && this.gas > 0 && !this.lunge;
+    const dashing = attached && intent.boost && this.gas > 0 && !this.busy;
     this.dashing = dashing;
+    const D = cfg.dash;
+    if (dashing) this.dashHeld = Math.min(D.rampTime, this.dashHeld + dt);
+    else this.dashHeld = Math.max(0, this.dashHeld - dt * D.rampDecay);
+    const rx = this.dashHeld / D.rampTime;
+    this.dashRamp = D.rampStart + (1 - D.rampStart) * rx * rx * (3 - 2 * rx);
+    this.dashGlow = dashing ? Math.max(this.dashGlow, this.dashRamp) : Math.max(0, this.dashGlow - dt * 0.6);
     if (dashing) {
       this.gas = Math.max(0, this.gas - cfg.dash.gasUse * dt);
       if (intent.boostPressed) {
@@ -206,18 +224,16 @@ export class PlayerController {
         } else if (!hk.pullOn && !hk.slack && d > A * 3) hk.pullOn = true;
       }
     }
-    const pulling = attached && this.ropeStyle === 'pull' && !this.lunge && (this.hooks.left.pullOn || this.hooks.right.pullOn);
+    const pulling = attached && this.ropeStyle === 'pull' && !this.busy && (this.hooks.left.pullOn || this.hooks.right.pullOn);
     this.pulling = pulling;
     this.reeling = pulling ? 1 : attached ? Math.max(intent.reel, dashing ? 1 : 0) : 0;
 
-    // 加速（消耗氣體）
+    // 地面衝刺：壓低身體滑鏟（可從巨人腳下穿過）
+    if (this.groundDashTimer > 0) this.groundDashTimer -= dt;
+    if (intent.boostPressed && this.grounded && !attached && !this.busy && this.gas >= D.groundGas * 0.5) this._groundDash(_wish, world);
+    // 加速（消耗氣體）：空中沿視角方向噴氣
     this.boosting = false;
-    if (intent.boost && this.gas > 0 && !this.lunge && !attached) {
-      if (this.grounded && intent.boostPressed) {
-        // 地面上按加速 → 先起跳
-        this.vel.y = Math.max(this.vel.y, P.jumpSpeed);
-        this.grounded = false;
-      }
+    if (intent.boost && this.gas > 0 && !this.busy && !attached && !this.grounded && this.groundDashTimer <= 0) {
       this.boosting = true;
       this.gas = Math.max(0, this.gas - cfg.boost.gasUse * dt);
     }
@@ -229,7 +245,7 @@ export class PlayerController {
       this.sliding = false;
       this.emit('jump', {});
     }
-    const airThrust = intent.jumpHeld && !this.grounded && !attached && this.gas > 0 && !this.lunge;
+    const airThrust = intent.jumpHeld && !this.grounded && !attached && this.gas > 0 && !this.busy;
     if (airThrust) this.gas = Math.max(0, this.gas - cfg.boost.gasUse * 0.6 * dt);
 
     // 氣體回復
@@ -249,6 +265,9 @@ export class PlayerController {
         this.emit('hang', {});
       }
     }
+
+    // 兵長斬：空中短拍 → 沿鋼索迴旋直衝勾點
+    if (this.levi) this._leviMove(dt);
 
     // 衝刺斬（lunge）期間：直接朝弱點高速移動
     if (this.lunge) {
@@ -270,7 +289,7 @@ export class PlayerController {
     let hitWall = false;
 
     for (let i = 0; i < n; i++) {
-      if (!this.lunge) {
+      if (!this.busy) {
         const gScale = pulling ? (dashing ? cfg.dash.gravityScale : cfg.hook.pull.gravityScale) : this.hangTimer > 0 ? cfg.fling.hangGravityScale : 1;
         this.vel.y -= cfg.gravity * gScale * h;
 
@@ -303,7 +322,7 @@ export class PlayerController {
       this.pos.addScaledVector(this.vel, h);
 
       // 鋼索約束（雙索時依序套用兩次以收斂）
-      if (attached && !this.lunge) {
+      if (attached && !this.busy) {
         for (let it = 0; it < 2; it++) {
           for (const side of ['left', 'right']) {
             const hk = this.hooks[side];
@@ -328,7 +347,7 @@ export class PlayerController {
         }
       }
       // 勾住時撞牆：把撞擊速度轉成沿牆往上衝（像跑上牆面），放索後就能翻上屋頂
-      if ((attached || this.pullReleaseTimer > 0) && !this.lunge && res.wallImpact > 4) {
+      if ((attached || this.pullReleaseTimer > 0) && !this.busy && res.wallImpact > 4) {
         // 記住撞進牆裡的水平速度，翻過牆頂後還給角色（衝過牆頂繼續往前飛）
         const lost = _tmp.copy(res.wallNormal).multiplyScalar(-res.wallImpact);
         lost.y = 0;
@@ -382,11 +401,81 @@ export class PlayerController {
       }
     }
 
-    let cap = Math.max(P.minSpeedCap, P.maxSpeed * this.speedScale);
-    if (this.dashing || this.anySlack) cap = Math.max(cap, cfg.dash.speed * this.dashScale * cfg.dash.maxSpeedFactor);
+    // 最高速度：衝刺時依力道逐步放寬；放開後保留當下速度，再慢慢降回一般上限（不會一放就掉速）
+    const baseCap = Math.max(P.minSpeedCap, P.maxSpeed * this.speedScale);
+    const dashCap = Math.max(baseCap, D.speed * this.dashScale * D.maxSpeedFactor);
+    let cap = baseCap;
+    if (this.dashing) {
+      cap = baseCap + (dashCap - baseCap) * this.dashRamp;
+      this.capBoost = Math.max(this.capBoost, Math.min(cap, this.speed));
+    } else {
+      this.capBoost = Math.max(0, this.capBoost - D.carryDecay * dt);
+      cap = Math.max(cap, this.capBoost);
+      if (this.anySlack) cap = Math.max(cap, dashCap);
+    }
+    if (this.levi || this.groundDashTimer > 0) cap = Math.max(cap, this.speed);
     softLimitSpeed(this.vel, cap, P.softLimitRate, dt);
     this.maxSpeed = Math.max(this.maxSpeed, this.speed);
     if (hitWall) this.emit('bump', {});
+  }
+
+  /** 地面衝刺：壓低身體沿搖桿（沒推就沿視角）方向滑鏟 */
+  _groundDash(wish, world) {
+    const D = this.cfg.dash;
+    if (wish.lengthSq() > 0.04) _tmp.copy(wish).setY(0);
+    else _tmp.copy(world.camForward).setY(0);
+    if (_tmp.lengthSq() < 1e-4) return;
+    _tmp.normalize();
+    const sp = Math.max(Math.hypot(this.vel.x, this.vel.z), D.groundSpeed * Math.max(0.7, this.speedScale));
+    this.vel.x = _tmp.x * sp;
+    this.vel.z = _tmp.z * sp;
+    this.vel.y = Math.min(this.vel.y, 0);
+    this.sliding = true;
+    this.groundDashTimer = D.groundTime;
+    this.gas = Math.max(0, this.gas - D.groundGas);
+    this.emit('groundDash', {});
+  }
+
+  /** 兵長斬：開始空中短拍（之後自動沿鋼索直衝） */
+  startLevi(side) {
+    if (!this.hooks[side].attached || this.busy) return false;
+    this.levi = { phase: 'windup', t: 0, side, done: false };
+    this.hooks[side].slack = false;
+    this.grounded = false;
+    this.sliding = false;
+    this.emit('leviWindup', { side });
+    return true;
+  }
+
+  _leviMove(dt) {
+    const L = this.levi;
+    const C = this.cfg.strike;
+    const hk = this.hooks[L.side];
+    if (!hk.attached) {
+      this.levi = null; // 鋼索被解除 → 取消
+      return;
+    }
+    L.t += dt;
+    hk.anchor(_anchor);
+    if (L.phase === 'windup') {
+      // 空中短拍：速度快速收住、微微浮起
+      const k = Math.exp(-9 * dt);
+      this.vel.x *= k;
+      this.vel.z *= k;
+      this.vel.y = this.vel.y * k + C.leviFloat * (1 - k);
+      if (L.t >= C.leviWindup) {
+        L.phase = 'dash';
+        L.t = 0;
+        L.speed = Math.max(this.speed, C.leviSpeed * Math.max(0.45, this.speedScale));
+        this.emit('leviDash', {});
+      }
+      return;
+    }
+    _tmp.subVectors(_anchor, this.pos);
+    const d = _tmp.length();
+    this.vel.copy(_tmp).multiplyScalar(L.speed / Math.max(d, 1e-3));
+    hk.length = Math.max(this.cfg.hook.minLength, d);
+    if (d <= C.leviHitDist + L.speed * dt || L.t >= C.leviMaxTime) L.done = true;
   }
 
   /** 按下衝刺瞬間：沿搖桿方向（沒推搖桿就沿目前擺盪方向）補一下推力 */
@@ -400,7 +489,7 @@ export class PlayerController {
       else _tmp.copy(this.vel);
       _tmp.addScaledVector(_anchor, -_tmp.dot(_anchor)); // 只取垂直於繩子的方向
       if (_tmp.lengthSq() < 1e-3) return;
-      this.vel.addScaledVector(_tmp.normalize(), D.swingKick * Math.max(0.4, this.dashScale));
+      this.vel.addScaledVector(_tmp.normalize(), D.swingKick * Math.max(0.4, this.dashScale) * this.dashRamp);
       return;
     }
   }
@@ -443,12 +532,13 @@ export class PlayerController {
         if (this.dashing) {
           // 衝刺（擺盪式）：快速收繩，但不壓掉側向速度；繩子變短時切線速度變快（角動量守恆）
           const D = this.cfg.dash;
-          const reel = D.reelSpeed * this.dashScale;
+          const r = this.dashRamp; // 氮氣式：按越久收得越快
+          const reel = D.reelSpeed * this.dashScale * r;
           // 實際把繩子收短（鋼索約束每步最多修正 maxCorrection，不會瞬移）
           hk.length = Math.max(H.minLength, Math.min(hk.length, dist) - reel * h);
-          if (along < reel) this.vel.addScaledVector(_anchor, Math.min(D.radialAccel * Math.max(0.4, this.dashScale) * h, reel - along));
+          if (along < reel) this.vel.addScaledVector(_anchor, Math.min(D.radialAccel * Math.max(0.4, this.dashScale) * r * h, reel - along));
           if (hk.prevDist && dist < hk.prevDist) {
-            const k = Math.min(D.spinUpMax, hk.prevDist / dist) - 1;
+            const k = (Math.min(D.spinUpMax, hk.prevDist / dist) - 1) * r;
             _tmp.copy(this.vel).addScaledVector(_anchor, -this.vel.dot(_anchor));
             this.vel.addScaledVector(_tmp, k);
           }

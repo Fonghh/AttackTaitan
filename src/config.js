@@ -91,6 +91,15 @@ export const CONFIG = {
     slackExtra: 45, // 衝到勾點後鋼索放鬆，繩長 = 當下距離 + 這麼多
     launchBonus: 0.45, // 衝到勾點時向上速度加成
     launchUp: 12, // 額外向上速度（m/s，× 衝刺倍率）
+    // 氮氣式加速：按住越久力道越大；放開後速度上限慢慢降，不會一放就掉速
+    rampTime: 1.4, // 按住幾秒達到全力
+    rampStart: 0.25, // 剛按下時的力道比例
+    rampDecay: 1.5, // 放開後累積的力道以幾倍速度消退（短暫放開再按可以接著加速）
+    carryDecay: 7, // 放開衝刺後，最高速度上限每秒下降多少（m/s）
+    // 地面衝刺：沒勾住、在地上按衝刺＝壓低身體滑鏟（可穿過巨人腳下、經過腳踝自動砍）
+    groundSpeed: 34, // m/s × max(0.7, 速度倍率)
+    groundTime: 0.55, // 滑鏟期間（秒）：可穿過巨人、靠近腳踝自動砍
+    groundGas: 12,
   },
 
   boost: {
@@ -132,6 +141,16 @@ export const CONFIG = {
     legSlideSpeed: 26, // 砍腳後滑向巨人背後的最低速度（m/s）
     legSlideBehind: 7, // 滑到巨人背後多遠（× 巨人體型）
     passThrough: 0.8, // 滑行期間可穿過巨人身體的秒數
+    // 兵長斬：勾住時長按斬擊 → 空中短拍蓄力 → 沿鋼索迴旋直衝目標，命中後鋼索自動解除
+    leviHold: 0.22, // 長按多久算長按（秒）；短按仍是一般斬擊
+    leviWindup: 0.3, // 空中短拍（蓄力浮空）秒數
+    leviFloat: 3, // 短拍時往上浮的速度（m/s）
+    leviSpeed: 76, // 直衝速度（m/s）× max(0.45, 速度倍率)
+    leviMaxTime: 1.8, // 直衝最長秒數
+    leviHitDist: 3.2, // 距離勾點多近算抵達
+    leviRange: 7, // 抵達時的命中範圍（× 巨人體型）
+    leviDamageBonus: 1.3, // 後頸傷害加成
+    leviPop: 10, // 命中後往上彈（m/s）
     groundSpinRange: 1.6, // 地面迴旋斬：離腳踝 partRange × 此值以內
     spinRange: 7, // 迴旋斬範圍（× 巨人體型）
     spinSpeedFactor: 0.6, // 迴旋斬的速度門檻 = 一般斬擊 × 此值

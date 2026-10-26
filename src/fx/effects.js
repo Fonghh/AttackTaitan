@@ -493,15 +493,41 @@ export class Effects {
   }
 
   /** 迴旋斬：繞著角色一圈的刀光 */
-  spinRing(pos) {
+  spinRing(pos, color = '#bfe6ff') {
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2;
       const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
-      this.slashes.spawn(_v2.copy(pos).addScaledVector(dir, 1.2), dir, Math.PI / 2, 1.5, '#bfe6ff');
+      this.slashes.spawn(_v2.copy(pos).addScaledVector(dir, 1.2), dir, Math.PI / 2, 1.5, color);
     }
     for (let i = 0; i < 24; i++) {
       const a = Math.random() * Math.PI * 2;
       this.glow.spawn({ x: pos.x, y: pos.y + 0.3, z: pos.z, vx: Math.sin(a) * 16, vy: (Math.random() - 0.5) * 3, vz: Math.cos(a) * 16, max: 0.3, s0: 0.4, s1: 0.05, r: 0.75, g: 0.9, b: 1, drag: 3 });
+    }
+  }
+
+  /** 兵長斬：刀身殘光換成粉紅色 */
+  setBladeTint(levi) {
+    if (this._bladeTint === levi) return;
+    this._bladeTint = levi;
+    this.blades.left.color.set(levi ? '#ff4f9a' : '#b98bff');
+    this.blades.right.color.set(levi ? '#ff86c0' : '#7fd8ff');
+  }
+
+  /** 兵長斬蓄力：紅光往內收 */
+  leviCharge(pos) {
+    for (let i = 0; i < 30; i++) {
+      const a = Math.random() * Math.PI * 2, e = (Math.random() - 0.5) * 2;
+      const dx = Math.sin(a) * 3, dz = Math.cos(a) * 3, dy = e * 2;
+      this.glow.spawn({ x: pos.x + dx, y: pos.y + 0.3 + dy, z: pos.z + dz, vx: -dx * 7, vy: -dy * 7, vz: -dz * 7, max: 0.18, s0: 0.35, s1: 0.05, r: 1, g: 0.2, b: 0.25, drag: 2 });
+    }
+  }
+
+  /** 兵長斬的粉紅殘光（直衝時又多又長） */
+  leviTrail(pos, dashing) {
+    const n = dashing ? 7 : 1;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, r = dashing ? 0.6 + Math.random() * 0.6 : 0.8;
+      this.glow.spawn({ x: pos.x + Math.sin(a) * r, y: pos.y + 0.3 + Math.cos(a) * r, z: pos.z + Math.cos(a) * r * 0.6, vx: 0, vy: 0, vz: 0, max: dashing ? 0.45 : 0.25, s0: dashing ? 0.8 : 0.4, s1: 0.08, r: 1, g: 0.35 + Math.random() * 0.25, b: 0.65, a: 0.9 });
     }
   }
 

@@ -256,3 +256,73 @@ test('dash keeps and amplifies sideways swing (not a straight pull)', () => {
   assert.ok(side > 8, `swung ${side.toFixed(1)}m sideways`);
   assert.ok(maxTangential > 20, `tangential swing speed grew to ${maxTangential.toFixed(1)} m/s`);
 });
+
+test('dash builds up like nitro: speed rises gradually instead of jumping at once', () => {
+  const p = new PlayerController(CONFIG);
+  p.speedScale = CONFIG.player.defaultSpeedScale;
+  p.pos.set(0, 45, 82); // 勾點很遠，衝刺途中不會先抵達
+  p.fireHook('right', p.pos.clone(), anchorAt(0, 50, 0));
+  for (let i = 0; i < 12; i++) p.update(1 / 60, idle(), world());
+  const base = p.speed;
+  const speeds = [];
+  for (let i = 0; i < 90; i++) {
+    p.update(1 / 60, { ...idle(), boost: true, boostPressed: i === 0 }, world());
+    speeds.push(p.speed);
+  }
+  const early = speeds[14] - base; // 0.25 秒
+  const late = speeds[89] - base; // 1.5 秒
+  assert.ok(early < 10, `first 0.25 s adds only ${early.toFixed(1)} m/s`);
+  assert.ok(late > early + 8, `keeps stacking speed: +${late.toFixed(1)} m/s after 1.5 s`);
+  assert.ok(p.dashRamp > 0.95, 'reached full nitro');
+});
+
+test('releasing dash keeps the momentum (cap eases down instead of snapping)', () => {
+  const p = new PlayerController(CONFIG);
+  p.speedScale = CONFIG.player.defaultSpeedScale;
+  p.pos.set(0, 45, 82);
+  p.fireHook('right', p.pos.clone(), anchorAt(0, 50, 0));
+  for (let i = 0; i < 12; i++) p.update(1 / 60, idle(), world());
+  for (let i = 0; i < 90; i++) p.update(1 / 60, { ...idle(), boost: true, boostPressed: i === 0 }, world());
+  const atRelease = p.speed;
+  p.releaseAll();
+  for (let i = 0; i < 15; i++) p.update(1 / 60, idle(), world());
+  assert.ok(p.speed > atRelease * 0.85, `0.25 s after release: ${p.speed.toFixed(1)} of ${atRelease.toFixed(1)} m/s`);
+  assert.ok(p.dashGlow > 0.5, 'speed feel fades out slowly');
+});
+
+test('ground dash: low slide along the stick direction, no jump', () => {
+  const p = new PlayerController(CONFIG);
+  p.speedScale = CONFIG.player.defaultSpeedScale;
+  p.pos.set(0, CONFIG.player.radius, 0);
+  for (let i = 0; i < 10; i++) p.update(1 / 60, idle(), world());
+  const z0 = p.pos.z;
+  let maxY = 0;
+  for (let i = 0; i < 40; i++) {
+    p.update(1 / 60, { ...idle(), move: { x: 0, y: 1 }, boost: true, boostPressed: i === 0 }, world());
+    maxY = Math.max(maxY, p.pos.y);
+  }
+  assert.ok(z0 - p.pos.z > 8, `slid ${(z0 - p.pos.z).toFixed(1)}m forward`);
+  assert.ok(maxY < 1.5, `stayed low (max y ${maxY.toFixed(2)})`);
+});
+
+test('Levi slash: brief hover, then spins straight along the rope to the anchor', () => {
+  const p = new PlayerController(CONFIG);
+  p.speedScale = CONFIG.player.defaultSpeedScale;
+  p.pos.set(0, 20, 50);
+  p.vel.set(15, -5, 0);
+  p.fireHook('right', p.pos.clone(), anchorAt(0, 40, 0));
+  for (let i = 0; i < 20; i++) p.update(1 / 60, idle(), world());
+  assert.ok(p.hooks.right.attached);
+  assert.ok(p.startLevi('right'));
+  for (let i = 0; i < 12; i++) p.update(1 / 60, idle(), world());
+  assert.equal(p.levi.phase, 'windup');
+  assert.ok(p.speed < 8, `hover during wind-up (${p.speed.toFixed(1)} m/s)`);
+  let frames = 0;
+  while (p.levi && !p.levi.done && frames < 200) {
+    p.update(1 / 60, idle(), world());
+    frames++;
+  }
+  assert.ok(p.levi && p.levi.done, 'arrived');
+  assert.ok(p.pos.distanceTo(new Vector3(0, 40, 0)) < CONFIG.strike.leviHitDist + 2, `ends next to the anchor (${p.pos.distanceTo(new Vector3(0, 40, 0)).toFixed(1)}m)`);
+  assert.ok(frames < 90, `fast dash (${frames} frames)`);
+});

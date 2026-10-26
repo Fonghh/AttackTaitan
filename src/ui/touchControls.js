@@ -163,6 +163,7 @@ export class TouchControls {
       if (!b.classList.contains('pressed')) return;
       b.classList.remove('pressed');
       if (act === 'boost') this.input.touch.boost = false;
+      if (act === 'strike') this.input.push('strikeUp'); // 長按斬擊（兵長斬）的放開
       const d = b._drag;
       b._drag = null;
       if (!hold || !d) return;

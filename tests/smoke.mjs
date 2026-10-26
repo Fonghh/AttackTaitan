@@ -337,6 +337,80 @@ try {
   });
   check('ground spin slash at the ankle makes the titan kneel', slide.spin && slide.kneel, JSON.stringify(slide));
   check('after the leg cut the player slides through to behind the titan', slide.behind > 3 * slide.scale, JSON.stringify(slide));
+  // 兵長斬：勾在巨人後頸上 → 長按斬擊 → 短拍 → 沿鋼索迴旋直衝 → 命中後鋼索自動解除
+  const levi = await page.evaluate(() => {
+    const g = window.__game;
+    const V = g.pc.pos.constructor;
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    const t = g.titans[1];
+    for (const x of g.titans) x.attackCooldown = 99;
+    t.stunTimer = 5; // 不轉身
+    g.step(1 / 60, base());
+    const nape = t.napeWorld(new V());
+    let mesh = null;
+    t.root.traverse((o) => { if (!mesh && o.isMesh && o.userData.titanPart) mesh = o; });
+    g.pc.pos.copy(nape).addScaledVector(t.forward, -22).setY(nape.y + 8);
+    g.pc.vel.set(0, 0, 0);
+    g.pc.fireHook('right', g.pc.pos.clone(), { point: nape.clone(), object: mesh });
+    for (let i = 0; i < 30 && !g.pc.hooks.right.attached; i++) g.step(1 / 60, base());
+    const hooked = g.pc.hooks.right.attached;
+    const hp0 = t.hp;
+    const evs = new Set();
+    const orig = g._onPlayerEvent.bind(g);
+    g._onPlayerEvent = (e) => (evs.add(e.type), orig(e));
+    g._handleEvent('strike'); // 按住
+    let windupSpeed = 99, frames = 0;
+    while (frames < 200 && (g.strikeHold || g.pc.levi)) {
+      g._updateStrikeHold(1 / 60);
+      g.step(1 / 60, base());
+      if (g.pc.levi && g.pc.levi.phase === 'windup' && g.pc.levi.t > 0.2) windupSpeed = Math.min(windupSpeed, g.pc.speed);
+      frames++;
+    }
+    g._onPlayerEvent = orig;
+    // 短按（勾住時）仍是一般斬擊
+    return { hooked, dmg: hp0 - t.hp, released: !g.pc.anyAttached, events: [...evs], windupSpeed: +windupSpeed.toFixed(1), frames, aura: g.model.aura.material.opacity > 0 || true };
+  });
+  check('[levi] long-press strike while hooked: wind-up hover, spin-dash along the rope, hits, rope auto-releases', levi.hooked && levi.events.includes('leviWindup') && levi.events.includes('leviDash') && levi.dmg > 0 && levi.released && levi.windupSpeed < 8, JSON.stringify(levi));
+  const tapHooked = await page.evaluate(() => {
+    const g = window.__game;
+    g.restart(true);
+    g.renderer.setAnimationLoop(null);
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    g._hookToggle('auto');
+    for (let i = 0; i < 20; i++) g.step(1 / 60, base());
+    const s0 = g.stats.strikes;
+    g._handleEvent('strike');
+    g._updateStrikeHold(0.05);
+    g._handleEvent('strikeUp');
+    return { attached: g.pc.anyAttached, strikes: g.stats.strikes - s0, levi: !!g.pc.levi };
+  });
+  check('[levi] short tap while hooked is still a normal strike', tapHooked.strikes === 1 && !tapHooked.levi, JSON.stringify(tapHooked));
+  // 地面衝刺：滑鏟穿過巨人腳下，經過腳踝自動砍
+  const gdash = await page.evaluate(() => {
+    const g = window.__game;
+    const V = g.pc.pos.constructor;
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    g.pc.releaseAll();
+    const t = g.titans[2];
+    for (const x of g.titans) x.attackCooldown = 99;
+    t.kneelTimer = 0;
+    t.stunTimer = 5;
+    g.step(1 / 60, base());
+    const ank = t.ankleWorld('R', new V());
+    g.pc.pos.set(ank.x + t.forward.x * 14, 0.6, ank.z + t.forward.z * 14);
+    g.pc.vel.set(0, 0, 0);
+    for (let i = 0; i < 5; i++) g.step(1 / 60, base());
+    // 面向腳踝滑鏟
+    g.rig.yaw = Math.atan2(-(ank.x - g.pc.pos.x), -(ank.z - g.pc.pos.z));
+    g.strikeCooldown = 0;
+    let maxY = 0;
+    for (let i = 0; i < 60; i++) {
+      g.step(1 / 60, { ...base(), move: { x: 0, y: 1 }, boost: i < 5, boostPressed: i === 0 });
+      maxY = Math.max(maxY, g.pc.pos.y);
+    }
+    return { kneel: t.kneelTimer > 0, maxY: +maxY.toFixed(2) };
+  });
+  check('[ground dash] slide under the titan cuts the ankle automatically', gdash.kneel && gdash.maxY < 2, JSON.stringify(gdash));
   check('cutting the eye stuns the titan', parts.stun, JSON.stringify(parts));
   check('frontal strike does not hit the weak point', parts.frontNoNape);
 

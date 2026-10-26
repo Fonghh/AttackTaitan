@@ -106,6 +106,24 @@ export class PlayerModel {
     this.slashSide = 1;
     this.lean = new THREE.Quaternion();
     this._spinQ = new THREE.Quaternion();
+
+    // 兵長斬：紅色光暈＋沿飛行方向高速旋轉
+    this.aura = new THREE.Mesh(
+      new THREE.SphereGeometry(1.15, 16, 12),
+      new THREE.MeshBasicMaterial({ color: '#ff2a3a', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }),
+    );
+    this.aura.position.y = 0.2;
+    this.aura.visible = false;
+    this.root.add(this.aura);
+    this.leviMode = 0;
+    this.leviAngle = 0;
+    this._leviAxis = new THREE.Vector3();
+  }
+
+  /** 兵長斬狀態：0 無、1 空中短拍（蓄力）、2 迴旋直衝 */
+  setLevi(mode, vel) {
+    this.leviMode = mode;
+    this._leviVel = vel;
   }
 
   /** 刀身根部與刀尖的世界座標（刀身殘光用） */
@@ -165,6 +183,25 @@ export class PlayerModel {
     _q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -dy * 1.5));
     this.lean.slerp(_q, Math.min(1, dt * 8));
     this.body.quaternion.copy(this.lean);
+    if (this.leviMode) {
+      // 短拍：身體縮起慢轉蓄力；直衝：沿飛行方向像鑽頭一樣高速旋轉
+      this.leviAngle += dt * (this.leviMode === 2 ? Math.PI * 9 : Math.PI * 2.5);
+      const lv = this._leviVel;
+      if (this.leviMode === 2 && lv && lv.lengthSq() > 1) {
+        // 飛行方向轉到 root 的座標系（root 只有 yaw）
+        this._leviAxis.copy(lv).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw);
+        this._spinQ.setFromAxisAngle(this._leviAxis, this.leviAngle);
+      } else {
+        this._spinQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.leviAngle);
+      }
+      this.body.quaternion.premultiply(this._spinQ);
+      this.slashTimer = Math.max(this.slashTimer, 0.1);
+    }
+    const auraTarget = this.leviMode === 2 ? 0.55 : this.leviMode === 1 ? 0.35 + 0.15 * Math.sin(this.time * 30) : 0;
+    const am = this.aura.material;
+    am.opacity += (auraTarget - am.opacity) * Math.min(1, dt * 14);
+    this.aura.visible = am.opacity > 0.02;
+    this.aura.scale.setScalar(this.leviMode === 1 ? 1.25 : 1);
     if (this.spinTimer > 0) {
       this.spinTimer -= dt;
       const k = 1 - Math.max(0, this.spinTimer) / 0.45;
