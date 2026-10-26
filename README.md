@@ -5,6 +5,8 @@
 
 技術：Three.js 0.186 + Vite 8，純 JavaScript（ES Modules）。
 
+**線上試玩：https://attacktaitan.alegu.workers.dev**（推到 `main` 後 Cloudflare 自動部署）
+
 ## 安裝與執行
 
 ```bash
