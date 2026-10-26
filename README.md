@@ -115,11 +115,11 @@ tests/
   smoke.mjs                 Playwright 煙霧測試
 ```
 
-## 發佈到 Cloudflare Pages
+## 發佈到 Cloudflare
 
-專案已備好 Cloudflare Pages 設定（`.node-version` 指定 Node 22、`public/_headers` 設定快取），用 Git 連動部署，不需要 API 金鑰：
+專案已備好 Cloudflare Workers 靜態網站設定（`wrangler.jsonc` 指定發佈 `dist`、`.node-version` 指定 Node 22、`public/_headers` 設定快取），用 Git 連動部署，不需要 API 金鑰：
 
-1. Cloudflare 後台 → Workers & Pages → Create → Pages → Connect to Git，選 `fonghh/attacktaitan`。
-2. Production branch：`main`（或先選 `feature/grapple-prototype` 測試）。
-3. Framework preset：`Vite`（或 None）；Build command：`npm run build`；Build output directory：`dist`。
-4. 儲存並部署。之後每次 push 都會自動重新部署；其他分支會有各自的預覽網址。
+1. Cloudflare 後台 → Workers & Pages → Create → 匯入 Git 儲存庫 `fonghh/attacktaitan`。
+2. Build command：`npm run build`；Deploy command：`npx wrangler deploy`（預設值）。
+3. 部署的分支需要有這些設定檔（目前在 `feature/grapple-prototype`，合併到 `main` 後 `main` 也可以）。
+4. 之後每次 push 都會自動重新部署。
