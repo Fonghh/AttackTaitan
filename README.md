@@ -114,3 +114,12 @@ tests/
   physics.test.js           單元測試
   smoke.mjs                 Playwright 煙霧測試
 ```
+
+## 發佈到 Cloudflare Pages
+
+專案已備好 Cloudflare Pages 設定（`.node-version` 指定 Node 22、`public/_headers` 設定快取），用 Git 連動部署，不需要 API 金鑰：
+
+1. Cloudflare 後台 → Workers & Pages → Create → Pages → Connect to Git，選 `fonghh/attacktaitan`。
+2. Production branch：`main`（或先選 `feature/grapple-prototype` 測試）。
+3. Framework preset：`Vite`（或 None）；Build command：`npm run build`；Build output directory：`dist`。
+4. 儲存並部署。之後每次 push 都會自動重新部署；其他分支會有各自的預覽網址。
