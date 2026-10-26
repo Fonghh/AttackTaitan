@@ -17,7 +17,7 @@ export class Input {
     this.locked = false;
     this.enabled = false;
     // 觸控狀態（由 TouchControls 寫入）
-    this.touch = { joyX: 0, joyY: 0, boost: false, active: false, aimX: 0, aimY: 0 }; // aimX/Y：準心搖桿 -1..1
+    this.touch = { joyX: 0, joyY: 0, boost: false, active: false, aimX: 0, aimY: 0, turnX: 0, turnY: 0 }; // aimX/Y：準心 -1..1；turnX/Y：鏡頭轉動 -1..1
     this._prevBoost = false;
     this._prevJump = false;
 

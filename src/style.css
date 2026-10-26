@@ -695,6 +695,10 @@ body {
 .tbtn[hidden] {
   display: none;
 }
+.t-hook.turning {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+}
 .tbtn.pressed {
   transform: scale(0.92);
   background: rgba(255, 255, 255, 0.25);
@@ -725,7 +729,8 @@ body {
   box-shadow: 0 0 10px var(--gas);
 }
 .t-hook {
-  right: calc(12px + env(safe-area-inset-right, 0px));
+  /* 斬擊與衝刺中間的上方：右邊留約 110px 讓準心往右拖 */
+  right: calc(60px + env(safe-area-inset-right, 0px));
   bottom: calc(112px + env(safe-area-inset-bottom, 0px));
   width: 96px;
   height: 96px;

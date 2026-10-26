@@ -40,7 +40,7 @@ export const CONFIG = {
       gravityScale: 0.5, // 拉索期間的重力比例
       sideDamp: 0.35, // 側向速度每秒收斂比例（越小越保留側向橫移）
       steerAccel: 26, // 勾住時方向鍵／搖桿的側向操控力（m/s²）× 左右擺盪倍率
-      defaultSteerScale: 1.5, // 左右擺盪倍率預設值（暫停選單可調 50%～300%）
+      defaultSteerScale: 2.0, // 左右擺盪倍率預設值（暫停選單可調 50%～300%）
       arriveDist: 6, // 離勾點這麼近時停止拉動，鋼索保持勾住（變成繞勾點擺盪）
       launchBonus: 0.15, // 放開時向上速度 ×(1+此值)
       launchUp: 5, // 放開時額外的向上速度（m/s）
@@ -217,12 +217,21 @@ export const CONFIG = {
 
   // 手機準心搖桿（右邊鋼索鈕）：準心在畫面上移動，而不是轉鏡頭
   reticle: {
-    stickRadius: 70, // 手指拖多遠（px）準心到最邊
     rangeX: 0.75, // 準心最遠到畫面寬度的幾成（NDC）
     rangeY: 0.6,
-    edgeTurnRate: 1.6, // 推到邊緣時鏡頭慢慢轉的速度（rad/s）
+    // 兩段速度（px，皆會除以靈敏度倍率）
+    deadZone: 8, // 這麼近不動（防手抖）
+    slowEnd: 45, // 慢速區結束：準心只到最大範圍的 slowFrac
+    slowFrac: 0.3,
+    fastEnd: 75, // 快速區結束：準心到邊緣
+    turnRamp: 35, // 再推這麼遠，鏡頭轉速從 0 加到最快
+    maxTurnRate: 3.5, // 鏡頭最快轉速（rad/s，約 200°/秒）
+    edgePx: 14, // 手指離螢幕邊緣這麼近 → 視為推到底
+    defaultSens: 1.0, // 準心靈敏度預設（暫停選單 50%～200%）
     snap: true, // 準心吸附：靠近建築轉角／屋頂邊緣時吸過去（手機）
     snapRadiusPx: 44,
+    // 快速甩動轉身
+    flick: { enabled: true, minPx: 50, maxMs: 180, angleDeg: 90, duration: 0.16 },
   },
 
   world: {

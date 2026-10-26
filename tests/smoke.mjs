@@ -472,6 +472,7 @@ try {
   await page.waitForTimeout(700);
   await page.screenshot({ path: `${OUT}/04-speed.png` });
   check('no console/page errors (desktop)', errors.length === 0, errors.slice(0, 3).join(' | '));
+  await page.close(); // 關掉桌機頁面，避免背景持續渲染拖慢手機測試
 
   // ───────── 手機直立 ─────────
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
@@ -479,7 +480,7 @@ try {
   const merr = [];
   mp.on('pageerror', (e) => merr.push(e.message));
   await mp.goto(`${URL_BASE}?touch`);
-  await mp.waitForFunction(() => window.__game, null, { timeout: 20000 });
+  await mp.waitForFunction(() => window.__game, null, { timeout: 60000 });
   await mp.tap('#btn-start');
   await mp.waitForTimeout(600);
   const touchInfo = await mp.evaluate(() => {
@@ -556,14 +557,19 @@ try {
   await mp.evaluate(() => (window.__game.input.touch.aimX = window.__game.input.touch.aimY = 0));
   const yaw0 = await mp.evaluate(() => window.__game.rig.yaw);
   await mp.dispatchEvent('.t-hook', 'pointerdown', { pointerId: 7, isPrimary: true, clientX: cx, clientY: cy });
-  const R = 70;
-  for (let i = 1; i <= 6; i++) await mp.dispatchEvent('.t-hook', 'pointermove', { pointerId: 7, isPrimary: true, clientX: cx + (stick.x * R * i) / 6, clientY: cy - (stick.y * R * i) / 6 });
+  // 依新的兩段速度曲線，反推手指要拖多遠才會讓準心到 stick 的位置
+  const RC = await mp.evaluate(() => window.__game.cfg.reticle);
+  const m = Math.min(0.99, Math.hypot(stick.x, stick.y));
+  const dist = m <= RC.slowFrac ? RC.deadZone + (RC.slowEnd - RC.deadZone) * Math.pow(m / RC.slowFrac, 2 / 3) : RC.slowEnd + ((RC.fastEnd - RC.slowEnd) * (m - RC.slowFrac)) / (1 - RC.slowFrac);
+  const ux = stick.x / Math.hypot(stick.x, stick.y), uy = stick.y / Math.hypot(stick.x, stick.y);
+  const fx = ux * dist, fy = -uy * dist;
+  for (let i = 1; i <= 6; i++) await mp.dispatchEvent('.t-hook', 'pointermove', { pointerId: 7, isPrimary: true, clientX: cx + (fx * i) / 6, clientY: cy + (fy * i) / 6 });
   await mp.waitForTimeout(600);
   const mid = await mp.evaluate(() => {
     const ch = document.getElementById('crosshair').getBoundingClientRect();
     return { yaw: window.__game.rig.yaw, chX: ch.left + ch.width / 2, chY: ch.top + ch.height / 2, aim: !!window.__game.aims.auto };
   });
-  await mp.dispatchEvent('.t-hook', 'pointerup', { pointerId: 7, isPrimary: true, clientX: cx + stick.x * R, clientY: cy - stick.y * R });
+  await mp.dispatchEvent('.t-hook', 'pointerup', { pointerId: 7, isPrimary: true, clientX: cx + fx, clientY: cy + fy });
   await mp.waitForFunction(() => window.__fired > 0, null, { timeout: 30000 }).catch(() => {});
   await mp.waitForTimeout(400);
   const after = await mp.evaluate(() => ({ fired: window.__fired, aimX: window.__game.input.touch.aimX, rx: window.__game.reticle.x }));
@@ -602,6 +608,51 @@ try {
   check('mobile: crosshair snaps to a nearby building corner/edge', snap.snapped, JSON.stringify(snap));
   const dashBtn = await mp.evaluate(() => document.querySelector('.t-boost').textContent.trim());
   check('mobile: boost button is now labelled 衝刺', dashBtn === '衝刺', dashBtn);
+  // 準心推過邊緣 → 鏡頭轉；快速甩動 → 轉 90°
+  await mp.evaluate(() => window.__game.restart(true));
+  await mp.waitForTimeout(300);
+  const hb2 = await mp.locator('.t-hook').boundingBox();
+  const hx = hb2.x + hb2.width / 2, hy = hb2.y + hb2.height / 2;
+  const yawA = await mp.evaluate(() => window.__game.rig.yaw);
+  await mp.dispatchEvent('.t-hook', 'pointerdown', { pointerId: 11, isPrimary: true, clientX: hx, clientY: hy });
+  for (let i = 1; i <= 5; i++) await mp.dispatchEvent('.t-hook', 'pointermove', { pointerId: 11, isPrimary: true, clientX: hx + i * 22, clientY: hy });
+  await mp.waitForTimeout(800);
+  const yawB = await mp.evaluate(() => window.__game.rig.yaw);
+  await mp.dispatchEvent('.t-hook', 'pointerup', { pointerId: 11, isPrimary: true, clientX: hx + 110, clientY: hy });
+  await mp.waitForTimeout(200);
+  check('mobile: pushing the aim stick past the edge turns the camera (right = yaw decreases)', yawA - yawB > 0.3, `yaw ${yawA.toFixed(2)} → ${yawB.toFixed(2)}`);
+  const room = await mp.evaluate(() => {
+    const h = document.querySelector('.t-hook').getBoundingClientRect();
+    const st = document.querySelector('.t-strike').getBoundingClientRect();
+    const bo = document.querySelector('.t-boost').getBoundingClientRect();
+    return { roomRight: innerWidth - (h.left + h.width / 2), between: h.left + h.width / 2 > st.left + st.width / 2 && h.left + h.width / 2 < bo.left + bo.width / 2 };
+  });
+  check('mobile: rope button sits above strike/dash with ~100px+ room to drag right', room.between && room.roomRight >= 100, JSON.stringify(room));
+  // 無頭瀏覽器送觸控事件很慢（每次數百毫秒），測試時放寬甩動的時間門檻；判定邏輯另有單元測試
+  await mp.waitForTimeout(1500); // 等前一個測試的發射處理完
+  await mp.evaluate(() => {
+    const g = window.__game;
+    g.pc.releaseAll();
+    g.cfg.reticle.flick.maxMs = 10000;
+    window.__evlog = [];
+    g.input.__origPush = g.input.__origPush || g.input.push.bind(g.input);
+    g.input.push = (e) => (window.__evlog.push(e), g.input.__origPush(e));
+    window.__yawC = g.rig.yaw;
+  });
+  await mp.dispatchEvent('.t-hook', 'pointerdown', { pointerId: 12, isPrimary: true, clientX: hx, clientY: hy });
+  await mp.dispatchEvent('.t-hook', 'pointermove', { pointerId: 12, isPrimary: true, clientX: hx - 40, clientY: hy + 3 });
+  await mp.dispatchEvent('.t-hook', 'pointermove', { pointerId: 12, isPrimary: true, clientX: hx - 75, clientY: hy + 5 });
+  await mp.dispatchEvent('.t-hook', 'pointerup', { pointerId: 12, isPrimary: true, clientX: hx - 75, clientY: hy + 5 });
+  await mp.waitForFunction(() => !!window.__game.flickTurn, null, { timeout: 20000 }).catch(() => {});
+  await mp.waitForFunction(() => !window.__game.flickTurn, null, { timeout: 20000 }).catch(() => {});
+  const flick = await mp.evaluate(() => ({ dyaw: window.__game.rig.yaw - window.__yawC, events: window.__evlog.filter((e) => e !== 'reticleReset') }));
+  await mp.evaluate(() => {
+    const g = window.__game;
+    g.cfg.reticle.flick.maxMs = 180;
+    g.input.push = g.input.__origPush;
+  });
+  check('mobile: quick swipe on the rope button turns ~90° left without firing', Math.abs(flick.dyaw - Math.PI / 2) < 0.25 && flick.events.join() === 'flick:-1', JSON.stringify(flick));
+
   // 速度倍率
   await mp.evaluate(() => window.__game.pause());
   await mp.tap('#spd-up');

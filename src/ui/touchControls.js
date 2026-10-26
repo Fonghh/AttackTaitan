@@ -3,6 +3,8 @@
 //   （已勾住時會直接換到新勾點）；點一下＝沒勾住時朝畫面中央發射、已勾住時放索。
 // 'single'（單索，預設）／'dual'（左右雙鉤）。
 
+import { aimCurve, detectFlick } from '../input/aimCurve.js';
+
 const TAP_MOVE = 14; // 手指移動小於此距離（px）視為點一下
 // 已勾住時：要「拖遠又拖久」才算換勾點，否則一律當作放索（避免想放索卻射出新鉤子）
 const SWITCH_MOVE = 40;
@@ -16,6 +18,8 @@ export class TouchControls {
     this.mode = 'single';
     this.joy = null; // { id, ox, oy }
     this.hookActive = { auto: false, left: false, right: false };
+    this.sens = cfg.reticle.defaultSens; // 準心靈敏度（Game 會依設定覆寫）
+    this.flickEnabled = cfg.reticle.flick.enabled;
     this.looks = new Map(); // pointerId → {x, y}
 
     root.innerHTML = `
@@ -110,7 +114,7 @@ export class TouchControls {
   _bindButton(b) {
     const act = b.dataset.act;
     const hold = b.dataset.hold;
-    const R = this.cfg.reticle.stickRadius;
+    const RC = this.cfg.reticle;
     b.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -132,16 +136,26 @@ export class TouchControls {
         const d = b._drag;
         if (!d || e.pointerId !== d.id) return;
         e.stopPropagation();
-        let dx = e.clientX - d.ox, dy = e.clientY - d.oy;
+        const dx = e.clientX - d.ox, dy = e.clientY - d.oy;
         d.moved = Math.max(d.moved, Math.hypot(dx, dy));
+        d.dx = dx;
+        d.dy = dy;
+        // 手指貼到螢幕邊緣 → 該方向視為推到底
+        const ep = RC.edgePx;
+        const edge = {
+          x: e.clientX >= innerWidth - ep ? 1 : e.clientX <= ep ? -1 : 0,
+          y: e.clientY >= innerHeight - ep ? 1 : e.clientY <= ep ? -1 : 0,
+        };
+        const a = aimCurve(dx, dy, RC, this.sens, edge);
+        this._setReticle(a.aimX, a.aimY);
+        this.input.touch.turnX = a.turnX;
+        this.input.touch.turnY = a.turnY;
+        // 搖桿圈的視覺：最遠顯示到「開始轉鏡頭」的位置
+        const vis = (RC.fastEnd + RC.turnRamp) / this.sens;
         const l = Math.hypot(dx, dy);
-        if (l > R) {
-          dx = (dx / l) * R;
-          dy = (dy / l) * R;
-        }
-        this.aimKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-        // 類比搖桿：推多遠，準心就離畫面中央多遠
-        this._setReticle(dx / R, -dy / R);
+        const k = l > vis ? vis / l : 1;
+        this.aimKnob.style.transform = `translate(calc(-50% + ${dx * k}px), calc(-50% + ${dy * k}px))`;
+        b.classList.toggle('turning', Math.abs(a.turnX) > 0.05 || Math.abs(a.turnY) > 0.05);
       });
     }
     const end = (e, cancelled) => {
@@ -153,8 +167,14 @@ export class TouchControls {
       b._drag = null;
       if (!hold || !d) return;
       this.aimStick.hidden = true;
-      if (!cancelled) {
-        const dur = performance.now() - d.t;
+      this.input.touch.turnX = this.input.touch.turnY = 0;
+      b.classList.remove('turning');
+      const dur = performance.now() - d.t;
+      // 快速甩動：轉身（不發射、不放索）
+      const flick = !cancelled && this.flickEnabled ? detectFlick(d.dx || 0, d.dy || 0, dur, this.cfg.reticle.flick) : 0;
+      if (flick) {
+        this.input.push(`flick:${flick}`);
+      } else if (!cancelled) {
         const tap = d.wasActive ? d.moved < SWITCH_MOVE || dur < SWITCH_TIME : d.moved < TAP_MOVE;
         // 點一下：切換（沒勾住→發射、勾住→放索）；拖曳後放開：朝準心發射（勾住時換勾點）
         this.input.push(tap ? `down:${hold}` : `aim:${hold}`);

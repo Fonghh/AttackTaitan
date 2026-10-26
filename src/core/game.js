@@ -72,7 +72,10 @@ export class Game {
     this.pc.ropeStyle = this._load('ropeStyle', cfg.hook.style);
     this.hookFollow = this._load('hookFollow', cfg.camera.hookFollow ? 'on' : 'off') === 'on';
     this.pc.dashScale = Math.max(0.1, Math.min(2, Number(this._load('dashScale', String(cfg.dash.defaultScale))) || cfg.dash.defaultScale));
-    this.pc.steerScale = Math.max(0.5, Math.min(3, Number(this._load('steerScale', String(cfg.hook.pull.defaultSteerScale))) || cfg.hook.pull.defaultSteerScale));
+    this.aimSens = Math.max(0.5, Math.min(2, Number(this._load('aimSens', String(cfg.reticle.defaultSens))) || cfg.reticle.defaultSens));
+    this.touchUI.sens = this.aimSens;
+    this.touchUI.flickEnabled = this._load('flick', cfg.reticle.flick.enabled ? 'on' : 'off') === 'on';
+    this.pc.steerScale = Math.max(0.5, Math.min(3, Number(this._load('steerScale2', String(cfg.hook.pull.defaultSteerScale))) || cfg.hook.pull.defaultSteerScale));
     this.pc.speedScale = Math.max(0.1, Math.min(1.5, Number(this._load('speedScale2', String(cfg.player.defaultSpeedScale))) || cfg.player.defaultSpeedScale));
     this.touchUI.setMode(this.hookMode);
 
@@ -129,9 +132,22 @@ export class Game {
     };
     const setSteer = (d) => {
       this.pc.steerScale = Math.round(Math.max(0.5, Math.min(3, this.pc.steerScale + d)) * 10) / 10;
-      this._save('steerScale', String(this.pc.steerScale));
+      this._save('steerScale2', String(this.pc.steerScale));
       this._syncModeLabel();
     };
+    const setSens = (d) => {
+      this.aimSens = Math.round(Math.max(0.5, Math.min(2, this.aimSens + d)) * 10) / 10;
+      this.touchUI.sens = this.aimSens;
+      this._save('aimSens', String(this.aimSens));
+      this._syncModeLabel();
+    };
+    $('sens-down').addEventListener('click', () => setSens(-0.1));
+    $('sens-up').addEventListener('click', () => setSens(0.1));
+    $('btn-flick').addEventListener('click', () => {
+      this.touchUI.flickEnabled = !this.touchUI.flickEnabled;
+      this._save('flick', this.touchUI.flickEnabled ? 'on' : 'off');
+      this._syncModeLabel();
+    });
     $('steer-down').addEventListener('click', () => setSteer(-0.1));
     $('steer-up').addEventListener('click', () => setSteer(0.1));
     $('dash-down').addEventListener('click', () => setDash(-0.1));
@@ -160,6 +176,8 @@ export class Game {
     document.getElementById('btn-hookfollow').textContent = this.hookFollow ? '鉤住時鏡頭跟隨人物：開' : '鉤住時鏡頭跟隨人物：關';
     document.getElementById('spd-val').textContent = `速度 ${Math.round(this.pc.speedScale * 100)}%`;
     document.getElementById('dash-val').textContent = `衝刺 ${Math.round(this.pc.dashScale * 100)}%（${Math.round(this.cfg.dash.speed * this.pc.dashScale)} m/s）`;
+    document.getElementById('sens-val').textContent = `準心靈敏度 ${Math.round(this.aimSens * 100)}%`;
+    document.getElementById('btn-flick').textContent = this.touchUI.flickEnabled ? '快速甩動轉身：開' : '快速甩動轉身：關';
     document.getElementById('steer-val').textContent = `左右擺盪 ${Math.round(this.pc.steerScale * 100)}%（${Math.round(this.cfg.hook.pull.steerAccel * this.pc.steerScale)} m/s²）`;
     document.getElementById('btn-follow').textContent = this.cameraFollow ? '鏡頭跟隨飛行方向：開' : '鏡頭跟隨飛行方向：關';
     document.body.classList.toggle('dual', this.hookMode === 'dual');
@@ -238,6 +256,7 @@ export class Game {
     this.endTimer = 0;
     this.strikeCooldown = 0;
     this.chroma = 0;
+    this.flickTurn = null;
     this._updateMission();
     if (play) {
       this.state = 'playing';
@@ -317,6 +336,14 @@ export class Game {
     }
     if (ev === 'help') {
       document.getElementById('help').classList.toggle('open');
+      return;
+    }
+    if (ev.startsWith('flick:')) {
+      if (this.state === 'playing') {
+        const a = (Number(ev.slice(6)) * this.cfg.reticle.flick.angleDeg * Math.PI) / 180;
+        this.flickTurn = { total: a, left: a };
+        this.audio.play('hookRelease');
+      }
       return;
     }
     if (ev === 'reticleReset') {
@@ -709,9 +736,22 @@ export class Game {
     // 準心推到畫面邊緣時，鏡頭慢慢跟著轉
     const t = this.input.touch;
     const R = this.cfg.reticle;
-    if (this.touch && (Math.abs(t.aimX) > 0.85 || Math.abs(t.aimY) > 0.85)) this.rig.lastManualLook = this.rig.time;
-    if (this.touch && Math.abs(t.aimX) > 0.85) this.rig.yaw -= Math.sign(t.aimX) * ((Math.abs(t.aimX) - 0.85) / 0.15) * R.edgeTurnRate * dt;
-    if (this.touch && Math.abs(t.aimY) > 0.85) this.rig.pitch = Math.max(-1.35, Math.min(1.25, this.rig.pitch + Math.sign(t.aimY) * ((Math.abs(t.aimY) - 0.85) / 0.15) * R.edgeTurnRate * 0.6 * dt));
+    // 準心推過邊緣：鏡頭轉動（用真實時間，慢動作時也轉得動）；轉動中暫停「鉤住時鏡頭跟隨」
+    const rdt = this.realDt ?? dt;
+    if (this.touch && (t.turnX || t.turnY)) {
+      this.rig.lastManualLook = this.rig.time;
+      this.rig.yaw -= t.turnX * R.maxTurnRate * rdt;
+      this.rig.pitch = Math.max(-1.35, Math.min(1.25, this.rig.pitch + t.turnY * R.maxTurnRate * 0.6 * rdt));
+    }
+    // 快速甩動轉身：0.16 秒內轉 90°
+    if (this.flickTurn) {
+      const f = this.flickTurn;
+      const step = Math.min(Math.abs(f.left), (Math.abs(f.total) / R.flick.duration) * rdt) * Math.sign(f.left);
+      this.rig.yaw -= step;
+      f.left -= step;
+      this.rig.lastManualLook = this.rig.time;
+      if (Math.abs(f.left) < 1e-4) this.flickTurn = null;
+    }
     // 靠近巨人時鏡頭壓低、往上仰（巨人顯得更巨大）
     let low = 0;
     if (titan.alive) {
