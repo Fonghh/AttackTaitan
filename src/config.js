@@ -39,7 +39,8 @@ export const CONFIG = {
       minSpeed: 6,
       gravityScale: 0.5, // 拉索期間的重力比例
       sideDamp: 0.35, // 側向速度每秒收斂比例（越小越保留側向橫移）
-      steerAccel: 26, // 勾住時方向鍵／搖桿的側向操控力（m/s²）
+      steerAccel: 26, // 勾住時方向鍵／搖桿的側向操控力（m/s²）× 左右擺盪倍率
+      defaultSteerScale: 1.5, // 左右擺盪倍率預設值（暫停選單可調 50%～300%）
       arriveDist: 6, // 離勾點這麼近時停止拉動，鋼索保持勾住（變成繞勾點擺盪）
       launchBonus: 0.15, // 放開時向上速度 ×(1+此值)
       launchUp: 5, // 放開時額外的向上速度（m/s）
@@ -47,6 +48,8 @@ export const CONFIG = {
       aimAssistDeg: 2, // 準星沒打中時，在這個角度內找最近的勾點（小，避免限制瞄準）
       aimAssistDegTouch: 3,
     },
+    titanAssistDeg: 5, // 準星附近這個角度內有巨人 → 優先勾巨人
+    titanAssistDegTouch: 7,
     travelSpeed: 260, // 鉤爪飛行速度（視覺 + 命中延遲）
     aimOffsetDeg: 10, // 雙索模式：左右鋼索相對準星的偏角
     initialSlack: 1.0, // 勾住瞬間的繩長 = 距離 × 此值（1 = 不會瞬間拉動位置）
@@ -120,6 +123,9 @@ export const CONFIG = {
     perfectDamage: 100,
     bodyDamage: 4,
     bodyRange: 3.5,
+    spinRange: 7, // 迴旋斬範圍（× 巨人體型）
+    spinSpeedFactor: 0.6, // 迴旋斬的速度門檻 = 一般斬擊 × 此值
+    spinDamageBonus: 1.15,
     hitStop: 0.11, // 頓點：命中瞬間畫面停住（秒）
     hitStopPerfect: 0.18,
     slowMo: 0.35, // 頓點後的慢動作恢復時間（秒）
@@ -144,8 +150,35 @@ export const CONFIG = {
     swipeKnock: 28,
     swipeRadius: 3.4,
     staggerTime: 1.2,
+    aggroRange: 95, // 玩家進入這個水平距離才會追擊／攻擊
+    // 部位效果
+    stunTime: 5, // 砍眼睛：暈眩秒數（不能轉身、攻擊、走路）
+    kneelTime: 4.5, // 砍腳：跪下秒數（後頸變低）
+    eyeDamage: 8,
+    legDamage: 12,
+    partRange: 4.5, // 部位斬擊距離（× 巨人體型）
+    // 抓取
+    grabChance: 0.45,
+    grabWindup: 0.7,
+    grabReach: 0.4,
+    grabRadius: 3.5,
+    grabHoldTime: 2.6, // 被抓住後幾秒沒掙脫就被捏
+    grabEscapeTaps: 5, // 連打斬擊幾次掙脫
+    crushDamage: 45,
+    // 死亡後屍體淡出
+    fadeDelay: 3,
+    fadeTime: 2,
     start: { x: 0, z: -10 },
   },
+
+  // 巨人配置：廣場一隻、大樓間街道上各處，其中兩隻成對在附近
+  titans: [
+    { name: '廣場巨人', x: 0, z: -10, yaw: 0.15, scale: 1.0, homeRadius: 40 },
+    { name: '西街巨人', x: -100, z: 50, yaw: 1.2, scale: 1.3, homeRadius: 12 },
+    { name: '東街巨人 A', x: 100, z: -50, yaw: -1.4, scale: 1.15, homeRadius: 12, tint: '#c98f74' },
+    { name: '東街巨人 B', x: 100, z: -100, yaw: -1.0, scale: 1.45, homeRadius: 12, tint: '#b98670', hair: '#1f1712' },
+    { name: '南巷大巨人', x: -100, z: -100, yaw: 0.6, scale: 1.6, homeRadius: 10, tint: '#ddb090' },
+  ],
 
   camera: {
     distance: 6.5,

@@ -26,6 +26,8 @@ export class PlayerController {
     this.ropeStyle = cfg.hook.style;
     this.speedScale = 1; // 速度倍率（暫停選單調整）：影響拉索、加速與最高速度
     this.dashScale = cfg.dash.defaultScale; // 衝刺倍率（暫停選單調整）
+    this.steerScale = cfg.hook.pull.defaultSteerScale; // 左右擺盪倍率（暫停選單調整）
+    this.grabbedBy = null; // 被哪隻巨人抓住
     this.reset();
   }
 
@@ -272,7 +274,8 @@ export class PlayerController {
           this._groundMove(h, intent);
         } else {
           // 空中轉向；勾住時側向操控更強（朝方向鍵的方向擺盪／橫移）
-          this.vel.addScaledVector(_wish, (attached && this.ropeStyle === 'pull' ? cfg.hook.pull.steerAccel : P.airAccel) * h);
+          const steer = attached ? (this.ropeStyle === 'pull' ? cfg.hook.pull.steerAccel : P.airAccel) * this.steerScale : P.airAccel;
+          this.vel.addScaledVector(_wish, steer * h);
           if (airThrust) this.vel.y += P.airThrust * h;
         }
 

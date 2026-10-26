@@ -258,6 +258,47 @@ class SlashArcs {
   }
 }
 
+/** 刀身殘光：沿著刀身（根部→刀尖）掃過的軌跡畫成一條漸淡的帶子 */
+class BladeRibbon {
+  constructor(scene, color) {
+    this.N = 7; // 殘光長度（幀數）
+    this.pos = new Float32Array(this.N * 2 * 3);
+    this.col = new Float32Array(this.N * 2 * 3);
+    const idx = [];
+    for (let i = 0; i < this.N - 1; i++) {
+      const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
+      idx.push(a, b, c, b, d, c);
+    }
+    this.geo = new THREE.BufferGeometry();
+    this.geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    this.geo.setAttribute('color', new THREE.BufferAttribute(this.col, 3));
+    this.geo.setIndex(idx);
+    this.mesh = new THREE.Mesh(
+      this.geo,
+      new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    this.mesh.frustumCulled = false;
+    scene.add(this.mesh);
+    this.color = new THREE.Color(color);
+    this.hist = [];
+  }
+
+  update(base, tip, intensity) {
+    this.hist.unshift([base.clone(), tip.clone()]);
+    if (this.hist.length > this.N) this.hist.length = this.N;
+    for (let i = 0; i < this.N; i++) {
+      const h = this.hist[Math.min(i, this.hist.length - 1)];
+      const o = i * 6;
+      this.pos.set([h[0].x, h[0].y, h[0].z, h[1].x, h[1].y, h[1].z], o);
+      const f = intensity * Math.pow(1 - i / this.N, 1.6);
+      this.col.set([this.color.r * f * 0.4, this.color.g * f * 0.4, this.color.b * f * 0.4, this.color.r * f, this.color.g * f, this.color.b * f], o);
+    }
+    this.geo.attributes.position.needsUpdate = true;
+    this.geo.attributes.color.needsUpdate = true;
+    this.mesh.visible = intensity > 0.01;
+  }
+}
+
 /**
  * 刀光線：命中時劃過弱點的長條發光線（面向鏡頭的細長平面，沿刀路方向）。
  * 先快速伸長，再變細淡出。
@@ -325,6 +366,9 @@ export class Effects {
     this.ropes = { left: new RopeVisual(scene, '#9fb8c8'), right: new RopeVisual(scene, '#c8b89f') };
     this.slashes = new SlashArcs(scene);
     this.streaks = new BladeStreaks(scene);
+    this.blades = { left: new BladeRibbon(scene, '#b98bff'), right: new BladeRibbon(scene, '#7fd8ff') };
+    this._bBase = new THREE.Vector3();
+    this._bTip = new THREE.Vector3();
     // 鉤爪命中閃光
     this.flashes = [];
     for (let i = 0; i < 4; i++) {
@@ -408,6 +452,28 @@ export class Effects {
       const d = side.clone().multiplyScalar(Math.cos(tilt)).addScaledVector(up, Math.sin(tilt));
       this.streaks.spawn(point, d, len * 1.05, big ? 0.6 : 0.45, '#ff3a2a', 0.38);
       this.streaks.spawn(point, d, len, big ? 0.2 : 0.14, '#ffffff', 0.32);
+    }
+  }
+
+  /** 刀身殘光：飛行速度越快越亮；揮刀時全亮 */
+  updateBlades(model, speed, slashing) {
+    const k = slashing ? 1 : Math.max(0, Math.min(0.45, (speed - 15) / 50));
+    for (const side of ['left', 'right']) {
+      model.bladeWorld(side, this._bBase, this._bTip, slashing);
+      this.blades[side].update(this._bBase, this._bTip, k);
+    }
+  }
+
+  /** 迴旋斬：繞著角色一圈的刀光 */
+  spinRing(pos) {
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2;
+      const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
+      this.slashes.spawn(_v2.copy(pos).addScaledVector(dir, 1.2), dir, Math.PI / 2, 1.5, '#bfe6ff');
+    }
+    for (let i = 0; i < 24; i++) {
+      const a = Math.random() * Math.PI * 2;
+      this.glow.spawn({ x: pos.x, y: pos.y + 0.3, z: pos.z, vx: Math.sin(a) * 16, vy: (Math.random() - 0.5) * 3, vz: Math.cos(a) * 16, max: 0.3, s0: 0.4, s1: 0.05, r: 0.75, g: 0.9, b: 1, drag: 3 });
     }
   }
 

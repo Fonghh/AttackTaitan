@@ -25,6 +25,7 @@ export class CameraRig {
     this.extraFov = 0;
     this.shake = 0;
     this.fovKick = 0;
+    this.cine = null;
     this.lastManualLook = -10;
     this.distSmooth = this.cfg.camera.distance;
     this.time = 0;
@@ -34,6 +35,19 @@ export class CameraRig {
   /** 鏡頭推拉：負值＝往前推（視角變窄），正值＝拉寬，之後自動回復 */
   kick(deg) {
     this.fovKick += deg;
+  }
+
+  /** 擊殺特寫：從巨人側面看後頸，慢動作約 1 秒後切回 */
+  startKillCam(titan, napePos) {
+    const s = titan.scale;
+    const f = titan.forward;
+    const side = new THREE.Vector3(-f.z, 0, f.x);
+    // 選離目前鏡頭比較近的那一側，切換比較不突兀
+    if (side.dot(_dir.subVectors(this.camera.position, napePos)) < 0) side.negate();
+    const pos = napePos.clone().addScaledVector(side, 9 * s).addScaledVector(f, -3 * s);
+    pos.y += 1.2 * s;
+    this.cine = { t: 1.1, pos, look: napePos.clone() };
+    this.camera.position.copy(pos);
   }
 
   addShake(a) {
@@ -53,6 +67,19 @@ export class CameraRig {
   }
 
   update(dt, pc, opts) {
+    // 擊殺特寫中：鏡頭固定在側面看著後頸（用真實時間計時，不受慢動作影響）
+    if (this.cine) {
+      const c = this.cine;
+      c.t -= opts.realDt ?? dt;
+      this.camera.position.lerp(c.pos, 0.2);
+      this.camera.lookAt(c.look);
+      if (Math.abs(this.camera.fov - 55) > 0.01) {
+        this.camera.fov = 55;
+        this.camera.updateProjectionMatrix();
+      }
+      if (c.t <= 0) this.cine = null;
+      return;
+    }
     const C = this.cfg.camera;
     this.time += dt;
     const speed = pc.feelSpeed ?? pc.speed; // 速度倍率換算後的體感速度
@@ -73,7 +100,8 @@ export class CameraRig {
       d = Math.atan2(Math.sin(d), Math.cos(d));
       const k = Math.min(1, C.hookFollowRate * dt);
       this.yaw += d * k;
-      this.pitch += (C.followPitch - this.pitch) * k * 0.3;
+      // 靠近巨人時往上仰（lowAngle 0～1）
+      this.pitch += (C.followPitch + (opts.lowAngle || 0) * 0.34 - this.pitch) * k * 0.3;
     }
     const delay = opts.touch ? C.autoFollowDelayTouch : C.autoFollowDelayMouse;
     const fl = Math.hypot(this.followDir.x, this.followDir.z);
@@ -92,7 +120,8 @@ export class CameraRig {
     const f = this.forward;
 
     // 速度帶來的距離與 FOV
-    const tgtDist = Math.min(C.maxExtraDist, Math.max(0, speed - 8) * C.distPerSpeed);
+    // 衝刺時鏡頭拉近角色，平常速度越快拉越遠
+    const tgtDist = opts.close ? -2.2 : Math.min(C.maxExtraDist, Math.max(0, speed - 8) * C.distPerSpeed);
     const tgtFov = Math.min(C.maxExtraFov, Math.max(0, speed - 10) * C.fovPerSpeed);
     const kk = 1 - Math.exp(-3 * dt);
     this.extraDist += (tgtDist - this.extraDist) * kk;
@@ -105,7 +134,7 @@ export class CameraRig {
 
     _right.set(-f.z, 0, f.x).normalize();
     _desired.copy(f).multiplyScalar(-dist).addScaledVector(_right, C.shoulder);
-    _desired.y += 0.6;
+    _desired.y += 0.6 - (opts.lowAngle || 0) * 1.6; // 靠近巨人時鏡頭壓低
 
     // 平滑的是「相對位移」，所以高速時不會落後角色
     const ko = 1 - Math.exp(-C.offsetSmooth * dt);

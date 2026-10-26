@@ -7,7 +7,7 @@ import { PlayerModel } from '../player/playerModel.js';
 import { HookAimer } from '../physics/grapple.js';
 import { CameraRig } from '../camera/cameraRig.js';
 import { Titan } from '../enemy/titan.js';
-import { evaluateStrike, canLunge } from '../combat/strike.js';
+import { evaluateStrike, canLunge, napeDamage } from '../combat/strike.js';
 import { Input, isTouchDevice } from '../input/input.js';
 import { TouchControls } from '../ui/touchControls.js';
 import { Hud } from '../ui/hud.js';
@@ -19,6 +19,8 @@ const _v2 = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _aimDir = new THREE.Vector3();
+/** 迴旋斬傷害：一般斬擊 × spinDamageBonus */
+const napeDamageSpin = (speed, cfg) => napeDamage(speed, cfg) * cfg.strike.spinDamageBonus;
 
 export class Game {
   constructor(container) {
@@ -44,12 +46,12 @@ export class Game {
     this.city = buildCity(this.scene, cfg.world, { x: cfg.player.spawn.x, z: cfg.player.spawn.z }, this.touch);
     this.pc = new PlayerController(cfg);
     this.model = new PlayerModel(this.scene);
-    this.titan = new Titan(this.scene, cfg);
-    this.titan.root.traverse((o) => {
-      if (o.isMesh) o.userData.titanPart = true;
-    });
+    this.titans = cfg.titans.map((sp) => new Titan(this.scene, cfg, sp));
+    this.titan = this.titans[0]; // 目前的目標巨人（離玩家最近、活著的）
+    this.titanRoots = this.titans.map((t) => t.root);
+    this.titanSpheres = this.titans.flatMap((t) => t.spheres);
 
-    this.hookables = [...this.city.hookables, this.titan.root];
+    this.hookables = [...this.city.hookables, ...this.titanRoots];
     this.aimer = new HookAimer(this.hookables);
     this.rig = new CameraRig(this.camera, cfg, this.city.hookables);
     this.fx = new Effects(this.scene, cfg);
@@ -60,7 +62,7 @@ export class Game {
     this.touchUI = new TouchControls(document.getElementById('touch'), this.input, cfg);
     this.touchUI.show(false);
 
-    this.spawnYaw = Math.atan2(cfg.player.spawn.x - cfg.titan.start.x, cfg.player.spawn.z - cfg.titan.start.z);
+    this.spawnYaw = Math.atan2(cfg.player.spawn.x - cfg.titans[0].x, cfg.player.spawn.z - cfg.titans[0].z);
     this.aims = { left: null, right: null, auto: null };
     this.autoSide = 'right';
     this.reticle = { x: 0, y: 0 }; // 準心在畫面上的位置（NDC，-1..1）
@@ -70,6 +72,7 @@ export class Game {
     this.pc.ropeStyle = this._load('ropeStyle', cfg.hook.style);
     this.hookFollow = this._load('hookFollow', cfg.camera.hookFollow ? 'on' : 'off') === 'on';
     this.pc.dashScale = Math.max(0.1, Math.min(2, Number(this._load('dashScale', String(cfg.dash.defaultScale))) || cfg.dash.defaultScale));
+    this.pc.steerScale = Math.max(0.5, Math.min(3, Number(this._load('steerScale', String(cfg.hook.pull.defaultSteerScale))) || cfg.hook.pull.defaultSteerScale));
     this.pc.speedScale = Math.max(0.1, Math.min(1.5, Number(this._load('speedScale2', String(cfg.player.defaultSpeedScale))) || cfg.player.defaultSpeedScale));
     this.touchUI.setMode(this.hookMode);
 
@@ -124,6 +127,13 @@ export class Game {
       this._save('dashScale', String(this.pc.dashScale));
       this._syncModeLabel();
     };
+    const setSteer = (d) => {
+      this.pc.steerScale = Math.round(Math.max(0.5, Math.min(3, this.pc.steerScale + d)) * 10) / 10;
+      this._save('steerScale', String(this.pc.steerScale));
+      this._syncModeLabel();
+    };
+    $('steer-down').addEventListener('click', () => setSteer(-0.1));
+    $('steer-up').addEventListener('click', () => setSteer(0.1));
     $('dash-down').addEventListener('click', () => setDash(-0.1));
     $('dash-up').addEventListener('click', () => setDash(0.1));
     $('spd-down').addEventListener('click', () => setSpeed(-0.1));
@@ -150,6 +160,7 @@ export class Game {
     document.getElementById('btn-hookfollow').textContent = this.hookFollow ? '鉤住時鏡頭跟隨人物：開' : '鉤住時鏡頭跟隨人物：關';
     document.getElementById('spd-val').textContent = `速度 ${Math.round(this.pc.speedScale * 100)}%`;
     document.getElementById('dash-val').textContent = `衝刺 ${Math.round(this.pc.dashScale * 100)}%（${Math.round(this.cfg.dash.speed * this.pc.dashScale)} m/s）`;
+    document.getElementById('steer-val').textContent = `左右擺盪 ${Math.round(this.pc.steerScale * 100)}%（${Math.round(this.cfg.hook.pull.steerAccel * this.pc.steerScale)} m/s²）`;
     document.getElementById('btn-follow').textContent = this.cameraFollow ? '鏡頭跟隨飛行方向：開' : '鏡頭跟隨飛行方向：關';
     document.body.classList.toggle('dual', this.hookMode === 'dual');
   }
@@ -213,7 +224,10 @@ export class Game {
 
   restart(play) {
     this.pc.reset();
-    this.titan.reset();
+    this.pc.grabbedBy = null;
+    this.grab = null;
+    for (const t of this.titans) t.reset();
+    this.titan = this.titans[0];
     this.rig.reset(this.spawnYaw);
     this.fx.reset();
     this.stats = { time: 0, strikes: 0, napeHits: 0, best: 0 };
@@ -223,7 +237,8 @@ export class Game {
     this.burst = 0;
     this.endTimer = 0;
     this.strikeCooldown = 0;
-    this.hud.setMission('任務：討伐巨人　弱點＝後頸（發光處）');
+    this.chroma = 0;
+    this._updateMission();
     if (play) {
       this.state = 'playing';
       this.input.enabled = true;
@@ -323,12 +338,47 @@ export class Game {
         }
         break;
       case 'strike':
-        this._strike();
+        if (this.grab) this._struggle();
+        else this._strike();
         break;
     }
   }
 
   // ────────────────────────── 戰鬥 ──────────────────────────
+  _updateMission() {
+    const dead = this.titans.filter((t) => !t.alive).length;
+    const total = this.titans.length;
+    this.hud.setMission(dead >= total ? '全部討伐完成！' : `任務：討伐巨人 ${dead}/${total}　弱點＝後頸（發光處）`);
+  }
+
+  /** 目前勾住的巨人（沒有則 null） */
+  _hookedTitan() {
+    for (const side of ['left', 'right']) {
+      const h = this.pc.hooks[side];
+      if (h.attached && h.object && h.object.userData.titan) return h.object.userData.titan;
+    }
+    return null;
+  }
+
+  /** 選擇目標巨人：勾住的優先，否則選後頸離玩家最近的（有一點黏性，避免一直切換） */
+  _pickTarget() {
+    const hooked = this._hookedTitan();
+    if (hooked && hooked.alive) {
+      this.titan = hooked;
+      return;
+    }
+    let best = null, bestD = Infinity;
+    for (const t of this.titans) {
+      if (!t.alive) continue;
+      const d = t.napeWorld(_v).distanceTo(this.pc.pos) * (t === this.titan ? 0.8 : 1);
+      if (d < bestD) {
+        bestD = d;
+        best = t;
+      }
+    }
+    if (best) this.titan = best;
+  }
+
   _evaluate() {
     const t = this.titan;
     t.napeWorld(this.napePos);
@@ -342,58 +392,134 @@ export class Game {
     if (this.strikeCooldown > 0 || this.pc.lunge) return;
     this.strikeCooldown = this.cfg.strike.cooldown;
     this.stats.strikes++;
-    this.model.startSlash();
     this.audio.play('slash');
-    const ev = this._evaluate();
     const dir = this.pc.speed > 2 ? _v2.copy(this.pc.vel).normalize() : _v2.copy(this.rig.forward);
-    this.fx.slash(_v.copy(this.pc.pos).addScaledVector(dir, 1.2), dir, this.model.slashSide, false);
 
+    // 勾在巨人身上、而且離巨人不遠 → 迴旋斬
+    const hooked = this._hookedTitan();
+    if (hooked && hooked.alive && hooked.napeWorld(_v).distanceTo(this.pc.pos) < this.cfg.strike.spinRange * hooked.scale + 8) {
+      this._spinAttack(hooked);
+      return;
+    }
+
+    this.model.startSlash();
+    this.fx.slash(_v.copy(this.pc.pos).addScaledVector(dir, 1.2), dir, this.model.slashSide, false);
     if (!this.titan.alive) return;
+    const ev = this._evaluate();
     if (ev.ok) {
       this._napeHit(ev);
+    } else if (this._partHit()) {
+      // 已在 _partHit 處理（眼睛／腳）
     } else if (ev.lunge) {
       // 衝刺斬：自動吸向弱點，抵達後再判定
+      const target = this.titan;
       this.pc.gas -= this.cfg.strike.lungeGas;
       this.pc.releaseAll();
-      this.pc.lunge = { timer: this.cfg.strike.lungeDuration, target: () => this.titan.napeWorld(this.napePos), done: false };
+      this.pc.lunge = { timer: this.cfg.strike.lungeDuration, target: () => target.napeWorld(this.napePos), done: false };
       this.audio.play('boost');
       this.rig.addShake(0.2);
       this.rig.kick(10); // 衝刺斬：視角拉寬，速度感
+      this.chroma = 0.45;
     } else if (this._bodyHit()) {
       // 已在 _bodyHit 處理
     } else if (ev.dist < this.cfg.strike.lungeRange && !ev.angleOk) {
-      this.hud.toast('正面無法斬擊！繞到巨人後方', 'warn', 1.2);
+      this.hud.toast('正面無法斬擊後頸！繞到後方，或砍眼睛、腳', 'warn', 1.4);
     } else if (ev.inRange && !ev.fastEnough) {
       this.hud.toast(`速度不足（需 ${(this.cfg.strike.minSpeed * this.pc.speedScale).toFixed(0)} m/s）`, 'warn', 1.2);
     }
   }
 
-  _bodyHit() {
+  /** 迴旋斬：勾在巨人身上時出招，範圍大、不限方向（後頸仍需從側後方） */
+  _spinAttack(titan) {
     const C = this.cfg.strike;
-    for (const s of this.titan.spheres) {
-      if (this.pc.pos.distanceTo(s.center) - s.r <= C.bodyRange) {
-        this.titan.takeHit(C.bodyDamage, false);
-        this.audio.play('hitBody');
-        this.fx.napeHit(_v.copy(this.pc.pos).lerp(s.center, 0.6), this.pc.vel.clone().normalize(), false);
-        const sp = this.hud.project(s.center, this.camera, {});
-        this.hud.popup(sp.x, sp.y, `-${C.bodyDamage}`, 'body');
-        this.hud.toast('表皮傷害——瞄準後頸弱點！', '', 1.2);
-        this.rig.addShake(0.3);
-        this.hitStop = 0.05; // 小頓點
-        if (!this.titan.alive) this._onKill();
-        return true;
+    this.model.startSpin();
+    this.fx.spinRing(this.pc.pos);
+    this.audio.play('swing');
+    this.rig.addShake(0.3);
+    this.titan = titan;
+    const ev = this._evaluate();
+    const range = C.spinRange * titan.scale;
+    const minSp = C.minSpeed * C.spinSpeedFactor;
+    if (ev.dist <= range && ev.speed >= minSp && ev.angleOk) {
+      ev.damage = Math.round(Math.min(C.maxDamage, napeDamageSpin(ev.speed, this.cfg)));
+      this._napeHit(ev, true);
+    } else if (!this._partHit(range)) {
+      this._bodyHit(range);
+    }
+  }
+
+  /** 部位斬擊：眼睛＝暈眩、腳（小腿下段）＝跪下 */
+  _partHit(rangeOverride) {
+    const T = this.cfg.titan;
+    const C = this.cfg.strike;
+    if (this.pc.feelSpeed < C.minSpeed * 0.6) return false;
+    for (const t of this.titans) {
+      if (!t.alive) continue;
+      const r = rangeOverride ?? T.partRange * t.scale;
+      for (const i of [0, 1]) {
+        if (t.stunTimer <= 0 && t.eyeWorld(i, _v).distanceTo(this.pc.pos) <= r) {
+          t.takePartHit('eye', T.eyeDamage);
+          this._partFx(_v, '眼睛！暈眩', t);
+          return true;
+        }
+      }
+      for (const side of ['L', 'R']) {
+        if (t.kneelTimer <= 0 && t.ankleWorld(side, _v).distanceTo(this.pc.pos) <= r * 1.2) {
+          t.takePartHit('leg', T.legDamage);
+          this._partFx(_v, '腳筋！跪下', t);
+          return true;
+        }
       }
     }
     return false;
   }
 
-  _napeHit(ev) {
+  _partFx(point, label, titan) {
+    const p = point.clone();
+    const dir = _v2.copy(this.pc.vel).normalize();
+    this.model.startSlash();
+    this.fx.burst(p, 1.0, '#ffd0a0', 0.2);
+    this.fx.bladeHit(p, dir, false);
+    this.fx.napeHit(p, dir, false);
+    this.audio.play('hitNape');
+    this.hitStop = 0.08;
+    this.slowMo = this.slowMoMax = 0.25;
+    this.rig.addShake(0.5);
+    this.rig.kick(-6);
+    this.chroma = 0.3;
+    const sp = this.hud.project(p, this.camera, {});
+    this.hud.popup(sp.x, sp.y - 16, label, 'crit');
+    if (!titan.alive) this._onKill(titan);
+  }
+
+  _bodyHit(rangeOverride) {
     const C = this.cfg.strike;
+    for (const t of this.titans) {
+      if (!t.alive) continue;
+      for (const s of t.spheres) {
+        if (this.pc.pos.distanceTo(s.center) - s.r <= (rangeOverride ?? C.bodyRange)) {
+          t.takeHit(C.bodyDamage, false);
+          this.audio.play('hitBody');
+          this.fx.napeHit(_v.copy(this.pc.pos).lerp(s.center, 0.6), this.pc.vel.clone().normalize(), false);
+          this.hud.toast('表皮傷害——瞄準後頸、眼睛或腳', '', 1.2);
+          this.rig.addShake(0.3);
+          this.hitStop = 0.05; // 小頓點
+          if (!t.alive) this._onKill(t);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  _napeHit(ev, spin = false) {
+    const C = this.cfg.strike;
+    const titan = this.titan;
     const dmg = ev.damage;
     const perfect = dmg >= C.perfectDamage;
-    this.titan.takeHit(dmg, true);
+    titan.takeHit(dmg, true);
     this.stats.napeHits++;
-    this.model.startSlash();
+    if (!spin) this.model.startSlash();
     const dir = _v2.copy(this.pc.vel).normalize();
     this.fx.burst(this.napePos, perfect ? 1.8 : 1.3, perfect ? '#ffb070' : '#ffd8b0', 0.24);
     this.fx.bladeHit(this.napePos, dir, perfect);
@@ -405,20 +531,81 @@ export class Game {
     this.rig.kick(perfect ? -14 : -9);
     this.rig.addShake(perfect ? 1.1 : 0.75);
     this.burst = 1;
+    this.chroma = perfect ? 0.6 : 0.4;
     this.hud.flash(perfect ? 'rgba(255,225,180,0.5)' : 'rgba(255,255,255,0.3)');
+    // 不顯示傷害數字，只用一個字強調
     const sp = this.hud.project(this.napePos, this.camera, {});
-    this.hud.popup(sp.x, sp.y - 20, `${perfect ? '完美斬擊！' : '要害！'} -${dmg}`, perfect ? 'perfect' : 'crit');
+    this.hud.popup(sp.x, sp.y - 20, spin ? '迴旋斬！' : perfect ? '完美斬擊！' : '斬！', perfect ? 'perfect' : 'crit');
     this.pc.vel.y = Math.max(this.pc.vel.y, 0) + 5; // 斬過後微微上彈
-    if (!this.titan.alive) this._onKill();
-    else this.hud.toast(`速度 ${this.pc.speed.toFixed(0)} m/s → 傷害 ${dmg}`, 'good', 1.3);
+    if (!titan.alive) this._onKill(titan);
   }
 
-  _onKill() {
+  /** 巨人死亡：勾在它身上的鋼索自動解除、擊殺特寫、更新任務 */
+  _onKill(titan) {
+    for (const side of ['left', 'right']) {
+      const h = this.pc.hooks[side];
+      if (h.active && h.object && h.object.userData.titan === titan) h.release();
+    }
+    if (this.grab && this.grab.titan === titan) this._endGrab(true);
     this.audio.play('kill');
-    this.hud.toast('討伐成功！', 'good big', 3);
-    this.hud.setMission('巨人已討伐！按 R 或「再來一次」重新開始');
-    this.hitStop = 0.25;
-    this.slowMo = this.slowMoMax = 0.9;
+    this.hitStop = 0.2;
+    this.slowMo = this.slowMoMax = 1.2;
+    this.rig.startKillCam(titan, this.napePos);
+    const left = this.titans.filter((t) => t.alive).length;
+    this.hud.toast(left === 0 ? '全部討伐完成！' : `討伐成功！還剩 ${left} 隻`, 'good big', 2.2);
+    this._updateMission();
+  }
+
+  // ── 被巨人抓住：連打斬擊掙脫 ──
+  _startGrab(titan) {
+    if (this.grab || this.pc.hp <= 0) return;
+    this.pc.releaseAll();
+    this.pc.lunge = null;
+    this.pc.grabbedBy = titan;
+    this.grab = { titan, taps: 0 };
+    this.audio.play('hurt');
+    this.rig.addShake(0.6);
+    this.hud.toast(`被抓住了！連打「斬擊」掙脫 0/${this.cfg.titan.grabEscapeTaps}`, 'bad big', 3);
+  }
+
+  _struggle() {
+    const g = this.grab;
+    const need = this.cfg.titan.grabEscapeTaps;
+    g.taps++;
+    this.model.startSlash();
+    this.audio.play('hitBody');
+    g.titan.grabHandWorld(_v);
+    this.fx.napeHit(_v, this.rig.forward, false);
+    this.rig.addShake(0.25);
+    if (g.taps >= need) {
+      g.titan.takeHit(6, false);
+      g.titan.releaseGrab(true);
+      this._endGrab(true);
+      this.hud.toast('掙脫了！', 'good', 1);
+    } else {
+      this.hud.toast(`連打「斬擊」掙脫 ${g.taps}/${need}`, 'bad big', 1.5);
+    }
+  }
+
+  _endGrab(escaped) {
+    const g = this.grab;
+    if (!g) return;
+    this.grab = null;
+    this.pc.grabbedBy = null;
+    // 從手中彈開
+    _v.subVectors(this.pc.pos, g.titan.root.position).setY(0).normalize();
+    this.pc.vel.copy(_v).multiplyScalar(escaped ? 14 : 22).setY(escaped ? 12 : 6);
+    this.pc.invuln = Math.max(this.pc.invuln, 0.8);
+  }
+
+  /** 色差（紅藍錯位）：命中與衝刺斬的瞬間 */
+  _updateChroma(dt) {
+    if (this.pc.lunge) this.chroma = Math.max(this.chroma, 0.35);
+    this.chroma = Math.max(0, (this.chroma || 0) - dt * 1.6);
+    const c = this.renderer.domElement;
+    const px = (this.chroma * 9).toFixed(1);
+    const f = this.chroma > 0.02 ? `drop-shadow(${px}px 0 0 rgba(255,40,60,0.55)) drop-shadow(-${px}px 0 0 rgba(40,170,255,0.55))` : 'none';
+    if (c.style.filter !== f) c.style.filter = f;
   }
 
   /** 放射狀速度線：衝刺斬／鋼索衝刺時出現，命中瞬間爆一下 */
@@ -446,6 +633,8 @@ export class Game {
 
     // 頓點：命中瞬間幾乎停住，接著慢動作逐漸恢復（卡肉感）
     const realDt = dt;
+    this.realDt = realDt;
+    this._updateChroma(realDt);
     if (this.hitStop > 0) {
       this.hitStop -= realDt;
       dt *= 0.02;
@@ -460,8 +649,8 @@ export class Game {
       this.step(dt, intent);
     } else {
       // 選單／暫停時仍更新攝影機與巨人呼吸
-      this.rig.update(dt, this.pc, { touch: this.touch, joyX: 0 });
-      this.titan.updatePose(0);
+      this.rig.update(dt, this.pc, { touch: this.touch, joyX: 0, realDt });
+      for (const t of this.titans) t.updatePose(0);
     }
     this.fx.setPixelScale(this.renderer.domElement.height, this.camera.fov);
     this.renderer.render(this.scene, this.camera);
@@ -469,7 +658,6 @@ export class Game {
 
   step(dt, intent) {
     const pc = this.pc;
-    const titan = this.titan;
     const playing = this.state === 'playing' && pc.hp > 0;
     if (!playing) {
       intent = { ...intent, move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false };
@@ -478,25 +666,37 @@ export class Game {
     this.strikeCooldown -= dt;
 
     // 巨人
-    titan.update(dt, pc);
-    for (const e of titan.events.splice(0)) this._onTitanEvent(e);
+    const world = { colliders: this.city.colliders };
+    for (const t of this.titans) {
+      if (t.gone) continue;
+      t.update(dt, pc, world);
+      for (const e of t.events.splice(0)) this._onTitanEvent(e, t);
+    }
+    this._pickTarget();
+    const titan = this.titan;
 
     // 玩家物理
     pc.update(dt, intent, {
       colliders: this.city.colliders,
       wallRadius: this.cfg.world.wallRadius,
-      titanSpheres: pc.lunge ? null : titan.spheres,
+      titanSpheres: pc.lunge || this.grab ? null : this.titanSpheres,
       camYaw: this.rig.yaw,
       camForward: this.rig.forward,
     });
     for (const e of pc.events.splice(0)) this._onPlayerEvent(e);
+
+    // 被抓住：角色固定在巨人手裡
+    if (this.grab) {
+      this.grab.titan.grabHandWorld(pc.pos);
+      pc.vel.set(0, 0, 0);
+    }
 
     // 衝刺斬抵達
     if (pc.lunge && pc.lunge.done) {
       pc.lunge = null;
       const ev = this._evaluate();
       if (ev.ok) this._napeHit(ev);
-      else if (!this._bodyHit()) this.hud.toast('偏了！', 'warn', 0.8);
+      else if (!this._partHit() && !this._bodyHit()) this.hud.toast('偏了！', 'warn', 0.8);
       pc.vel.multiplyScalar(0.8);
     }
 
@@ -512,11 +712,22 @@ export class Game {
     if (this.touch && (Math.abs(t.aimX) > 0.85 || Math.abs(t.aimY) > 0.85)) this.rig.lastManualLook = this.rig.time;
     if (this.touch && Math.abs(t.aimX) > 0.85) this.rig.yaw -= Math.sign(t.aimX) * ((Math.abs(t.aimX) - 0.85) / 0.15) * R.edgeTurnRate * dt;
     if (this.touch && Math.abs(t.aimY) > 0.85) this.rig.pitch = Math.max(-1.35, Math.min(1.25, this.rig.pitch + Math.sign(t.aimY) * ((Math.abs(t.aimY) - 0.85) / 0.15) * R.edgeTurnRate * 0.6 * dt));
+    // 靠近巨人時鏡頭壓低、往上仰（巨人顯得更巨大）
+    let low = 0;
+    if (titan.alive) {
+      const hd = Math.hypot(titan.root.position.x - pc.pos.x, titan.root.position.z - pc.pos.z);
+      low = Math.max(0, Math.min(1, 1 - (hd - 12 * titan.scale) / (35 * titan.scale)));
+      if (pc.pos.y > titan.height * 0.9) low *= 0.3; // 在巨人頭上時不仰拍
+    }
+    this.lowAngle += (low - (this.lowAngle || 0)) * Math.min(1, dt * 2);
     this.rig.update(dt, pc, {
       touch: this.touch,
       joyX: intent.move.x,
       autoFollow: this.cameraFollow,
       followYaw: hookFollow ? this.model.yaw : null,
+      lowAngle: this.lowAngle,
+      close: !!(pc.lunge || pc.dashing), // 衝刺時鏡頭拉近
+      realDt: this.realDt,
     });
     this.model.update(dt, pc, this.rig.yaw);
     this.city.update(pc.pos);
@@ -534,11 +745,18 @@ export class Game {
     if (pc.boosting || pc.dashing) this.fx.gasPuff(pc.pos, pc.vel, true);
     if (pc.lunge) this.fx.trail(pc.pos);
     if (pc.sliding) this.fx.dust(pc.pos, pc.vel, 1);
-    if (!titan.alive) {
-      titan.chest.getWorldPosition(_v);
-      this.fx.steam(_v, titan.state === 'dying' ? 3 : 1);
-    } else if (titan.hp < this.cfg.titan.hp && Math.random() < 0.3) {
-      this.fx.steam(this.napePos, 1);
+    this.fx.updateBlades(this.model, pc.feelSpeed, this.model.slashTimer > 0 || this.model.spinTimer > 0);
+    for (const t of this.titans) {
+      if (t.gone) continue;
+      if (!t.alive) {
+        if (Math.random() < 0.6) {
+          t.chest.getWorldPosition(_v);
+          this.fx.steam(_v, t.state === 'dying' ? 3 : 1);
+        }
+      } else {
+        if (t.hp < this.cfg.titan.hp && Math.random() < 0.2) this.fx.steam(t.napeWorld(_v), 1);
+        if (t.stunTimer > 0 && Math.random() < 0.4) this.fx.steam(t.eyeWorld(0, _v), 1);
+      }
     }
 
     this.audio.update(pc.feelSpeed, pc.boosting || pc.dashing, pc.dashing ? 1 : 0, pc.anyAttached);
@@ -557,7 +775,7 @@ export class Game {
 
     // 勝負
     if (this.state === 'playing') {
-      if (titan.state === 'dead') {
+      if (this.titans.every((t) => t.state === 'dead')) {
         this.endTimer += dt;
         if (this.endTimer > 1.2) this._end(true);
       } else if (pc.hp <= 0) {
@@ -596,7 +814,9 @@ export class Game {
       if (this.touch && R.snap && this.pc.ropeStyle === 'pull') {
         snapped = this.aimer.snapAim(this.camera, this.reticle, p, H.range, this.city.snapAnchors, R.snapRadiusPx, innerWidth, innerHeight);
       }
-      const a = (this.aims.auto = snapped || aimAt(0));
+      // 準心附近有巨人（且沒被建築擋住）→ 優先勾巨人
+      const titanAim = this.aimer.aimTitan(this.camera, f, p, H.range, this.touch ? H.titanAssistDegTouch : H.titanAssistDeg, this.titanRoots);
+      const a = (this.aims.auto = titanAim || snapped || aimAt(0));
       if (a) {
         // 勾點在左邊就用左發射器，右邊用右發射器
         _right.set(-f.z, 0, f.x).normalize();
@@ -604,8 +824,9 @@ export class Game {
       }
     } else {
       this.aims.auto = null;
-      this.aims.left = aimAt(H.aimOffsetDeg);
-      this.aims.right = aimAt(-H.aimOffsetDeg);
+      const tAim = (yawOff) => this.aimer.aimTitan(this.camera, _v2.copy(f).applyAxisAngle(_up, (yawOff * Math.PI) / 180), p, H.range, this.touch ? H.titanAssistDegTouch : H.titanAssistDeg, this.titanRoots);
+      this.aims.left = tAim(H.aimOffsetDeg) || aimAt(H.aimOffsetDeg);
+      this.aims.right = tAim(-H.aimOffsetDeg) || aimAt(-H.aimOffsetDeg);
     }
   }
 
@@ -663,22 +884,56 @@ export class Game {
     }
   }
 
-  _onTitanEvent(e) {
-    const d = this.titan.root.position.distanceTo(this.pc.pos);
+  _onTitanEvent(e, titan) {
+    const d = titan.root.position.distanceTo(this.pc.pos);
     switch (e.type) {
       case 'step':
         this.audio.play('step', { vol: Math.max(0.05, 0.6 - d / 200) });
         if (d < 50) this.rig.addShake(0.12 * (1 - d / 50));
         break;
       case 'windup':
-        this.audio.play('windup');
-        this.hud.toast('⚠ 巨人準備揮擊！', 'warn', 0.9);
+        if (d < 70) {
+          this.audio.play('windup');
+          this.hud.toast('⚠ 巨人準備揮擊！', 'warn', 0.9);
+        }
         break;
       case 'swing':
         this.audio.play('swing');
         break;
       case 'swipeHit':
-        this.pc.damage(this.cfg.titan.swipeDamage, e.knock);
+        if (!this.grab) this.pc.damage(this.cfg.titan.swipeDamage, e.knock);
+        break;
+      case 'grabWindup':
+        if (d < 70) {
+          this.audio.play('windup');
+          this.hud.toast('⚠ 巨人伸手要抓你！', 'warn', 0.9);
+        }
+        break;
+      case 'grabbed':
+        this._startGrab(titan);
+        break;
+      case 'crush':
+        if (this.grab && this.grab.titan === titan) {
+          this._endGrab(false);
+          this.pc.invuln = 0;
+          _v.subVectors(this.pc.pos, titan.root.position).setY(0).normalize().multiplyScalar(22).setY(6);
+          this.pc.damage(this.cfg.titan.crushDamage, _v.clone());
+        }
+        break;
+      case 'grabRelease':
+        if (this.grab && this.grab.titan === titan) this._endGrab(e.escaped);
+        break;
+      case 'blinded':
+        this.audio.play('kill');
+        this.hud.toast(`${titan.name}：眼睛受傷，暈眩 ${this.cfg.titan.stunTime} 秒！`, 'good', 1.8);
+        break;
+      case 'kneel':
+        this.rig.addShake(0.5);
+        this.audio.play('step', { vol: 0.6 });
+        this.hud.toast(`${titan.name}：腳筋被砍，跪下了！趁現在砍後頸`, 'good', 2);
+        break;
+      case 'dying':
+        if (d < 60) this.rig.addShake(0.4);
         break;
     }
   }

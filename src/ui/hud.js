@@ -106,7 +106,7 @@ export class Hud {
       el.className = `rope ${h.attached ? 'attached' : h.active ? 'flying' : ''}`;
     }
     e.titanHp.style.width = `${(titan.hp / this.cfg.titan.hp) * 100}%`;
-    e.titanHpText.textContent = titan.alive ? `${Math.ceil(titan.hp)} / ${this.cfg.titan.hp}` : '討伐完成';
+    e.titanHpText.textContent = titan.alive ? `${titan.name}（${Math.round(titan.height)}m）` : '討伐完成';
 
     // 鋼索預測標記
     const pos = {};

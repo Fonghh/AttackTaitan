@@ -102,8 +102,25 @@ export class PlayerModel {
     this.yaw = 0;
     this.time = 0;
     this.slashTimer = 0;
+    this.spinTimer = 0;
     this.slashSide = 1;
     this.lean = new THREE.Quaternion();
+    this._spinQ = new THREE.Quaternion();
+  }
+
+  /** 刀身根部與刀尖的世界座標（刀身殘光用） */
+  bladeWorld(side, base, tip, full = true) {
+    const sword = (side === 'left' ? this.armL : this.armR).sword;
+    base.set(0, 0, full ? -0.1 : -0.72); // 飛行時只取刀尖一小段
+    tip.set(0, 0, -0.95);
+    sword.localToWorld(base);
+    sword.localToWorld(tip);
+  }
+
+  /** 迴旋斬：整個人高速旋轉兩圈 */
+  startSpin() {
+    this.spinTimer = 0.45;
+    this.slashTimer = 0.28;
   }
 
   /** 鋼索發射口的世界座標 */
@@ -148,6 +165,12 @@ export class PlayerModel {
     _q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -dy * 1.5));
     this.lean.slerp(_q, Math.min(1, dt * 8));
     this.body.quaternion.copy(this.lean);
+    if (this.spinTimer > 0) {
+      this.spinTimer -= dt;
+      const k = 1 - Math.max(0, this.spinTimer) / 0.45;
+      this._spinQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), k * Math.PI * 4);
+      this.body.quaternion.premultiply(this._spinQ);
+    }
 
     // 姿勢
     const L = this.legL, R = this.legR;

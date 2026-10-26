@@ -195,6 +195,48 @@ export class HookAimer {
   }
 
   /**
+   * 巨人優先：準心附近 assistDeg 內有巨人身體（且中間沒有建築擋住）就勾巨人。
+   * 解決「瞄巨人時從身體縫隙穿過、勾到後面的大樓而飛過頭」。
+   */
+  aimTitan(camera, forward, playerPos, range, assistDeg, titanRoots) {
+    const camPos = camera.position;
+    const near = Math.max(0, camPos.distanceTo(playerPos) - 1.5);
+    const statics = this._statics || (this._statics = this.hookables.filter((o) => o.isMesh));
+    const right = this._right.crossVectors(forward, _up);
+    if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+    right.normalize();
+    const tryDir = (d) => {
+      this.ray.set(camPos, d);
+      this.ray.near = near;
+      this.ray.far = near + range + 12;
+      this._hits.length = 0;
+      this.ray.intersectObjects(titanRoots, true, this._hits);
+      const h = this._hits.find((x) => x.object.isMesh && !x.object.userData.noHook);
+      if (!h || h.point.distanceTo(playerPos) > range) return null;
+      // 被建築擋住就不算
+      this.ray.far = h.distance - 0.5;
+      this._hits.length = 0;
+      this.ray.intersectObjects(statics, false, this._hits);
+      if (this._hits.length) return null;
+      return { point: h.point.clone(), object: h.object, assisted: true, titan: true };
+    };
+    const center = tryDir(this._dir.copy(forward));
+    if (center) return center;
+    for (const ang of [assistDeg * 0.4, assistDeg * 0.75, assistDeg]) {
+      for (let k = 0; k < 10; k++) {
+        const d = this._dir.copy(forward);
+        _q.setFromAxisAngle(right, (ang * Math.PI) / 180);
+        d.applyQuaternion(_q);
+        _q.setFromAxisAngle(forward, (k / 10) * Math.PI * 2);
+        d.applyQuaternion(_q).normalize();
+        const hit = tryDir(d);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  }
+
+  /**
    * 準心吸附：準心附近（螢幕距離 radiusPx 內）有建築的轉角／屋頂邊緣時，吸到那一點。
    * 只採用鏡頭看得到的點（射線第一個打到的就是那棟建築、且就在該點附近）。
    * @param {{x:number,y:number}} reticle 準心 NDC

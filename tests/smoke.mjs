@@ -254,78 +254,197 @@ try {
   check('nape hit triggers hit-stop + slow motion + speed burst', hitInfo.slowMo > 0 && hitInfo.burst > 0.3, JSON.stringify(hitInfo));
   await page.evaluate(() => window.__game.restart(true));
 
-  // 4) 高速從巨人背後接近並斬擊
+  // 4) 多巨人配置、部位斬擊、抓取、巨人優先瞄準、擊殺自動解鋼索
+  const multi = await page.evaluate(() => {
+    const g = window.__game;
+    g.restart(true);
+    g.renderer.setAnimationLoop(null);
+    g.pc.speedScale = 1;
+    const V = g.pc.pos.constructor;
+    const ts = g.titans;
+    const out = {};
+    out.count = ts.length;
+    out.outsidePlaza = ts.filter((t) => Math.hypot(t.root.position.x, t.root.position.z) > 60).length;
+    let minPair = 1e9;
+    for (let i = 0; i < ts.length; i++) for (let j = i + 1; j < ts.length; j++) minPair = Math.min(minPair, ts[i].root.position.distanceTo(ts[j].root.position));
+    out.minPair = minPair;
+    out.heights = ts.map((t) => Math.round(t.height));
+    return out;
+  });
+  check('5 titans: some between buildings, a pair close together, varied sizes', multi.count === 5 && multi.outsidePlaza >= 3 && multi.minPair < 70 && Math.max(...multi.heights) >= 30, JSON.stringify(multi));
+
+  const parts = await page.evaluate(() => {
+    const g = window.__game;
+    const V = g.pc.pos.constructor;
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    for (const t of g.titans) t.attackCooldown = 99;
+    const t = g.titans[0];
+    const out = {};
+    // 砍腳：貼近腳踝、有速度
+    g.step(1 / 60, base());
+    const ank = t.ankleWorld('L', new V());
+    g.pc.pos.set(ank.x + 2, ank.y + 1, ank.z + 2);
+    g.pc.vel.set(-25, 0, -10);
+    g.strikeCooldown = 0;
+    g._strike();
+    out.kneel = t.kneelTimer > 0;
+    for (let i = 0; i < 60; i++) g.step(1 / 60, base());
+    const nKneel = t.napeWorld(new V()).y;
+    out.napeLowered = nKneel;
+    // 砍眼睛：在臉前方
+    const eye = t.eyeWorld(0, new V());
+    g.pc.pos.set(eye.x + t.forward.x * 2.5, eye.y, eye.z + t.forward.z * 2.5);
+    g.pc.vel.set(-t.forward.x * 25, 0, -t.forward.z * 25);
+    g.strikeCooldown = 0;
+    g._strike();
+    out.stun = t.stunTimer > 0;
+    // 正面砍後頸：不會造成後頸傷害
+    const hits0 = g.stats.napeHits;
+    const n0 = t.napeWorld(new V());
+    g.pc.pos.set(n0.x + t.forward.x * 5, n0.y + 2, n0.z + t.forward.z * 5);
+    g.pc.vel.set(-t.forward.x * 30, 0, -t.forward.z * 30);
+    g.strikeCooldown = 0;
+    g._strike();
+    out.frontNoNape = g.stats.napeHits === hits0;
+    return out;
+  });
+  check('cutting the ankle makes the titan kneel', parts.kneel, JSON.stringify(parts));
+  check('cutting the eye stuns the titan', parts.stun, JSON.stringify(parts));
+  check('frontal strike does not hit the weak point', parts.frontNoNape);
+
+  const grab = await page.evaluate(() => {
+    const g = window.__game;
+    const V = g.pc.pos.constructor;
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    const t = g.titans[1];
+    t.stunTimer = 0;
+    t.setState('grabReach');
+    for (let i = 0; i < 3; i++) {
+      t.grabHandWorld(g.pc.pos);
+      g.pc.vel.set(0, 0, 0);
+      g.step(1 / 60, base());
+    }
+    const grabbed = !!g.grab;
+    for (let i = 0; i < g.cfg.titan.grabEscapeTaps; i++) g._handleEvent('strike');
+    for (let i = 0; i < 5; i++) g.step(1 / 60, base());
+    return { grabbed, escaped: !g.grab && !t.holding };
+  });
+  check('titan can grab the player; mashing strike escapes', grab.grabbed && grab.escaped, JSON.stringify(grab));
+
+  const prio = await page.evaluate(() => {
+    const g = window.__game;
+    const V = g.pc.pos.constructor;
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    g.restart(true);
+    g.renderer.setAnimationLoop(null);
+    for (const t of g.titans) t.attackCooldown = 99;
+    const t = g.titans[0];
+    g.step(1 / 60, base());
+    // 站在巨人前方 45m 的空中，準星對準巨人身體旁邊 3°（縫隙、後面是建築）
+    const c = t.chest.getWorldPosition(new V());
+    g.pc.pos.set(c.x + t.forward.x * 45, c.y, c.z + t.forward.z * 45);
+    g.pc.vel.set(0, 0, 0);
+    const dx = c.x - g.pc.pos.x, dz = c.z - g.pc.pos.z;
+    g.rig.yaw = Math.atan2(-dx, -dz) + (5 * Math.PI) / 180;
+    g.rig.pitch = 0.05;
+    for (let i = 0; i < 15; i++) g.step(1 / 60, base());
+    const a = g.aims.auto;
+    return { titan: !!(a && a.object.userData.titan), what: a ? (a.object.userData.titan ? 'titan' : 'building') : 'none' };
+  });
+  check('aiming near a titan in front of buildings hooks the titan first', prio.titan, prio.what);
+
+  const kill = await page.evaluate(() => {
+    const g = window.__game;
+    const V = g.pc.pos.constructor;
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    const t = g.titans[0];
+    // 勾在巨人身上，然後擊殺
+    g._hookToggle('auto');
+    for (let i = 0; i < 20; i++) g.step(1 / 60, base());
+    const hookedBefore = g._hookedTitan() === t;
+    t.takeHit(999, true);
+    g._onKill(t);
+    const ropeGone = !g.pc.anyAttached;
+    for (let i = 0; i < 60; i++) g.step(1 / 60, base());
+    const noHook = t.root.children[0] && (() => { let ok = true; t.root.traverse((o) => { if (o.isMesh && !o.userData.noHook) ok = false; }); return ok; })();
+    const noCollide = t.spheres.every((s) => s.r === 0);
+    // 等屍體淡出（倒下 2.2 秒 + 躺著 3 秒 + 淡出 2 秒）
+    for (let i = 0; i < 540; i++) g.step(1 / 60, base());
+    return { hookedBefore, ropeGone, noHook, noCollide, gone: t.gone };
+  });
+  check('killing a titan auto-releases the rope attached to it', kill.hookedBefore && kill.ropeGone, JSON.stringify(kill));
+  check('dead titan cannot be hooked, has no collision, and fades away', kill.noHook && kill.noCollide && kill.gone, JSON.stringify(kill));
+
+  // 高速從背後斬擊：依序討伐全部巨人 → 勝利
   const fight = await page.evaluate(() => {
     const g = window.__game;
     const V = g.pc.pos.constructor;
     const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
     const dt = 1 / 60;
-    const out = { hits: [], frontBlocked: null, lungeHit: null };
-    g.titan.attackCooldown = 99;
-    const placeBehind = (dist, speed, height = 1) => {
-      const nape = g.titan.napeWorld(new V());
-      const f = g.titan.forward;
+    const out = { hits: [], lungeHit: null };
+    const placeBehind = (t, dist, speed, height = 1) => {
+      const nape = t.napeWorld(new V());
+      const f = t.forward;
       g.pc.releaseAll();
       g.pc.pos.set(nape.x - f.x * dist, nape.y + height, nape.z - f.z * dist);
       g.pc.vel.set(f.x * speed, 0, f.z * speed);
       g.rig.yaw = Math.atan2(-f.x, -f.z);
       g.rig.pitch = -0.05;
     };
-    // 正面攻擊應無效
-    const nape0 = g.titan.napeWorld(new V());
-    const f0 = g.titan.forward.clone();
-    g.pc.pos.set(nape0.x + f0.x * 5, nape0.y, nape0.z + f0.z * 5);
-    g.pc.vel.set(-f0.x * 30, 0, -f0.z * 30);
-    const hp0 = g.titan.hp;
-    g.strikeCooldown = 0;
-    g._strike();
-    out.frontBlocked = g.titan.hp >= hp0 - g.cfg.strike.bodyDamage;
     // 衝刺斬：12m 外、速度不足
-    placeBehind(12, 12, 1.5);
+    const t1 = g.titans[1];
+    for (const t of g.titans) t.attackCooldown = 99;
+    t1.stunTimer = 0;
+    t1.kneelTimer = 0;
+    g.step(dt, base());
+    placeBehind(t1, 12, 12, 1.5);
     g.strikeCooldown = 0;
-    const hp1 = g.titan.hp;
+    const hp1 = t1.hp;
     g.step(dt, base());
     g._strike();
     const lunging = !!g.pc.lunge;
     for (let i = 0; i < 40; i++) g.step(dt, base());
-    out.lungeHit = { lunging, dmg: hp1 - g.titan.hp };
-    // 直接高速斬擊直到擊殺
-    let guard = 0;
-    while (g.titan.alive && guard++ < 6) {
-      for (let i = 0; i < 80; i++) g.step(dt, base());
-      placeBehind(4, 40, 0.5);
-      g.strikeCooldown = 0;
-      const before = g.titan.hp;
-      g.step(dt, base());
-      g._strike();
-      out.hits.push(+(before - g.titan.hp).toFixed(0));
+    out.lungeHit = { lunging, dmg: hp1 - t1.hp };
+    for (const t of g.titans) {
+      let guard = 0;
+      while (t.alive && guard++ < 8) {
+        for (const x of g.titans) x.attackCooldown = 99;
+        for (let i = 0; i < 30; i++) g.step(dt, base());
+        placeBehind(t, 4, 40, 0.5);
+        g.strikeCooldown = 0;
+        const before = t.hp;
+        g.step(dt, base());
+        placeBehind(t, 4, 40, 0.5);
+        g._strike();
+        out.hits.push(+(before - t.hp).toFixed(0));
+      }
     }
-    out.alive = g.titan.alive;
+    out.alive = g.titans.filter((t) => t.alive).length;
     for (let i = 0; i < 240; i++) g.step(dt, base());
     out.state = g.state;
-    out.titanState = g.titan.state;
     return out;
   });
-  check('frontal strike does not hit the weak point', fight.frontBlocked);
   check('lunge strike triggers and damages', fight.lungeHit.lunging && fight.lungeHit.dmg > 0, `dmg ${fight.lungeHit.dmg}`);
-  check('high-speed nape strikes kill the titan', !fight.alive, `hits ${fight.hits.join(', ')}`);
-  check('win screen shown', fight.state === 'won', `state ${fight.state}/${fight.titanState}`);
+  check('high-speed nape strikes kill all titans', fight.alive === 0, `hits ${fight.hits.join(', ')}`);
+  check('win screen shown after all titans are dead', fight.state === 'won', `state ${fight.state}`);
   await page.evaluate(() => window.__game.renderer.render(window.__game.scene, window.__game.camera));
   await page.screenshot({ path: `${OUT}/03-win.png` });
 
   // 5) 重新開始
   await page.click('#result [data-restart]');
   await page.waitForTimeout(200);
-  const rs = await page.evaluate(() => ({ s: window.__game.state, hp: window.__game.titan.hp, y: window.__game.pc.pos.y }));
-  check('restart resets titan and player', rs.s === 'playing' && rs.hp === 100 && rs.y > 42);
+  const rs = await page.evaluate(() => ({ s: window.__game.state, hp: window.__game.titans.every((t) => t.hp === 100 && t.alive && !t.gone), y: window.__game.pc.pos.y }));
+  check('restart resets titans and player', rs.s === 'playing' && rs.hp && rs.y > 42);
 
   // 6) 巨人揮擊會傷害玩家
   const hurt = await page.evaluate(() => {
     const g = window.__game;
     g.renderer.setAnimationLoop(null);
     const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
-    const t = g.titan;
+    const t = g.titans[0];
     t.attackCooldown = 0;
+    const gc = g.cfg.titan.grabChance;
+    g.cfg.titan.grabChance = 0; // 這裡只測揮擊（抓取另有測試）
     let minHp = 100;
     for (let i = 0; i < 400; i++) {
       // 讓玩家停在巨人正前方、手的高度附近
@@ -335,6 +454,7 @@ try {
       g.step(1 / 60, base());
       minHp = Math.min(minHp, g.pc.hp);
     }
+    g.cfg.titan.grabChance = gc;
     return { minHp };
   });
   check('titan swipe can hurt the player', hurt.minHp < 100, `hp ${hurt.minHp}`);
