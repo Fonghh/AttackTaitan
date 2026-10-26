@@ -79,9 +79,9 @@ export const CONFIG = {
     defaultScale: 0.6, // 衝刺倍率預設值（暫停選單可調 10%～200%）
     sideDamp: 3, // 衝刺時側向速度收斂（路線比較直）
     gasUse: 22, // 每秒消耗氣體
-    slackExtra: 30, // 衝到勾點後鋼索放鬆，繩長 = 當下距離 + 這麼多
-    launchBonus: 0.2, // 衝到勾點時向上速度加成
-    launchUp: 6,
+    slackExtra: 45, // 衝到勾點後鋼索放鬆，繩長 = 當下距離 + 這麼多
+    launchBonus: 0.45, // 衝到勾點時向上速度加成
+    launchUp: 12, // 額外向上速度（m/s，× 衝刺倍率）
   },
 
   boost: {
@@ -120,7 +120,11 @@ export const CONFIG = {
     perfectDamage: 100,
     bodyDamage: 4,
     bodyRange: 3.5,
-    hitStop: 0.09,
+    hitStop: 0.11, // 頓點：命中瞬間畫面停住（秒）
+    hitStopPerfect: 0.18,
+    slowMo: 0.35, // 頓點後的慢動作恢復時間（秒）
+    slowMoPerfect: 0.55,
+    slowMoScale: 0.25, // 慢動作開始時的時間倍率
   },
 
   titan: {

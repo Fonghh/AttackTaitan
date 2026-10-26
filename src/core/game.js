@@ -218,6 +218,9 @@ export class Game {
     this.fx.reset();
     this.stats = { time: 0, strikes: 0, napeHits: 0, best: 0 };
     this.hitStop = 0;
+    this.slowMo = 0;
+    this.slowMoMax = 1;
+    this.burst = 0;
     this.endTimer = 0;
     this.strikeCooldown = 0;
     this.hud.setMission('任務：討伐巨人　弱點＝後頸（發光處）');
@@ -354,7 +357,8 @@ export class Game {
       this.pc.releaseAll();
       this.pc.lunge = { timer: this.cfg.strike.lungeDuration, target: () => this.titan.napeWorld(this.napePos), done: false };
       this.audio.play('boost');
-      this.rig.addShake(0.15);
+      this.rig.addShake(0.2);
+      this.rig.kick(10); // 衝刺斬：視角拉寬，速度感
     } else if (this._bodyHit()) {
       // 已在 _bodyHit 處理
     } else if (ev.dist < this.cfg.strike.lungeRange && !ev.angleOk) {
@@ -374,7 +378,8 @@ export class Game {
         const sp = this.hud.project(s.center, this.camera, {});
         this.hud.popup(sp.x, sp.y, `-${C.bodyDamage}`, 'body');
         this.hud.toast('表皮傷害——瞄準後頸弱點！', '', 1.2);
-        this.rig.addShake(0.2);
+        this.rig.addShake(0.3);
+        this.hitStop = 0.05; // 小頓點
         if (!this.titan.alive) this._onKill();
         return true;
       }
@@ -390,12 +395,17 @@ export class Game {
     this.stats.napeHits++;
     this.model.startSlash();
     const dir = _v2.copy(this.pc.vel).normalize();
-    this.fx.slash(this.napePos, dir, this.model.slashSide, true);
+    this.fx.burst(this.napePos, perfect ? 1.8 : 1.3, perfect ? '#ffb070' : '#ffd8b0', 0.24);
+    this.fx.bladeHit(this.napePos, dir, perfect);
     this.fx.napeHit(this.napePos, dir, perfect);
     this.audio.play('hitNape');
-    this.hitStop = C.hitStop * (perfect ? 1.8 : 1);
-    this.rig.addShake(perfect ? 0.9 : 0.55);
-    this.hud.flash(perfect ? 'rgba(255,230,190,0.35)' : 'rgba(255,255,255,0.2)');
+    // 頓點 → 慢動作 → 恢復；鏡頭往前推並猛震
+    this.hitStop = perfect ? C.hitStopPerfect : C.hitStop;
+    this.slowMo = this.slowMoMax = perfect ? C.slowMoPerfect : C.slowMo;
+    this.rig.kick(perfect ? -14 : -9);
+    this.rig.addShake(perfect ? 1.1 : 0.75);
+    this.burst = 1;
+    this.hud.flash(perfect ? 'rgba(255,225,180,0.5)' : 'rgba(255,255,255,0.3)');
     const sp = this.hud.project(this.napePos, this.camera, {});
     this.hud.popup(sp.x, sp.y - 20, `${perfect ? '完美斬擊！' : '要害！'} -${dmg}`, perfect ? 'perfect' : 'crit');
     this.pc.vel.y = Math.max(this.pc.vel.y, 0) + 5; // 斬過後微微上彈
@@ -408,6 +418,20 @@ export class Game {
     this.hud.toast('討伐成功！', 'good big', 3);
     this.hud.setMission('巨人已討伐！按 R 或「再來一次」重新開始');
     this.hitStop = 0.25;
+    this.slowMo = this.slowMoMax = 0.9;
+  }
+
+  /** 放射狀速度線：衝刺斬／鋼索衝刺時出現，命中瞬間爆一下 */
+  _updateSpeedBurst(dt) {
+    const pc = this.pc;
+    let target = 0;
+    if (pc.lunge) target = 1;
+    else if (pc.dashing) target = 0.55;
+    else if (pc.feelSpeed > 45) target = Math.min(0.35, (pc.feelSpeed - 45) / 40);
+    this.burst = Math.max(target, (this.burst || 0) - dt * 2.5);
+    const el = this.speedBurstEl || (this.speedBurstEl = document.getElementById('speedburst'));
+    el.style.opacity = this.burst.toFixed(3);
+    if (this.burst > 0.01) el.style.transform = `rotate(${(Math.random() * 6).toFixed(2)}deg) scale(${(1 + Math.random() * 0.04).toFixed(3)})`;
   }
 
   // ────────────────────────── 主迴圈 ──────────────────────────
@@ -420,10 +444,17 @@ export class Game {
       this.rig.look(intent.lookDX, intent.lookDY, intent.manualLook);
     }
 
+    // 頓點：命中瞬間幾乎停住，接著慢動作逐漸恢復（卡肉感）
+    const realDt = dt;
     if (this.hitStop > 0) {
-      this.hitStop -= dt;
-      dt *= 0.06;
+      this.hitStop -= realDt;
+      dt *= 0.02;
+    } else if (this.slowMo > 0) {
+      this.slowMo -= realDt;
+      const k = 1 - Math.max(0, this.slowMo) / this.slowMoMax;
+      dt *= this.cfg.strike.slowMoScale + (1 - this.cfg.strike.slowMoScale) * k * k;
     }
+    this._updateSpeedBurst(realDt);
 
     if (this.state === 'playing' || this.state === 'won' || this.state === 'lost') {
       this.step(dt, intent);
@@ -499,8 +530,9 @@ export class Game {
     this.wasReady = this.strikeEval.ok;
 
     // 特效
-    this.fx.update(dt, pc, this.model);
+    this.fx.update(dt, pc, this.model, this.camera);
     if (pc.boosting || pc.dashing) this.fx.gasPuff(pc.pos, pc.vel, true);
+    if (pc.lunge) this.fx.trail(pc.pos);
     if (pc.sliding) this.fx.dust(pc.pos, pc.vel, 1);
     if (!titan.alive) {
       titan.chest.getWorldPosition(_v);

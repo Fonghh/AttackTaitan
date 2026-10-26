@@ -4,6 +4,9 @@
 // 'single'（單索，預設）／'dual'（左右雙鉤）。
 
 const TAP_MOVE = 14; // 手指移動小於此距離（px）視為點一下
+// 已勾住時：要「拖遠又拖久」才算換勾點，否則一律當作放索（避免想放索卻射出新鉤子）
+const SWITCH_MOVE = 40;
+const SWITCH_TIME = 220; // ms
 
 export class TouchControls {
   constructor(root, input, cfg) {
@@ -116,7 +119,7 @@ export class TouchControls {
       } catch {}
       b.classList.add('pressed');
       if (hold) {
-        b._drag = { id: e.pointerId, ox: e.clientX, oy: e.clientY, moved: 0, t: performance.now() };
+        b._drag = { id: e.pointerId, ox: e.clientX, oy: e.clientY, moved: 0, t: performance.now(), wasActive: this.hookActive[hold] };
         this.aimStick.hidden = false;
         this.aimStick.style.left = `${e.clientX}px`;
         this.aimStick.style.top = `${e.clientY}px`;
@@ -151,7 +154,8 @@ export class TouchControls {
       if (!hold || !d) return;
       this.aimStick.hidden = true;
       if (!cancelled) {
-        const tap = d.moved < TAP_MOVE;
+        const dur = performance.now() - d.t;
+        const tap = d.wasActive ? d.moved < SWITCH_MOVE || dur < SWITCH_TIME : d.moved < TAP_MOVE;
         // 點一下：切換（沒勾住→發射、勾住→放索）；拖曳後放開：朝準心發射（勾住時換勾點）
         this.input.push(tap ? `down:${hold}` : `aim:${hold}`);
       }

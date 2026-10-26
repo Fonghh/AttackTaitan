@@ -61,6 +61,16 @@ body {
 }
 
 /* ───────── 全螢幕效果層 ───────── */
+#speedburst {
+  position: fixed;
+  inset: -10%;
+  pointer-events: none;
+  opacity: 0;
+  /* 放射狀速度線（動畫風），中央留空不擋視線 */
+  background: repeating-conic-gradient(from 0deg at 50% 50%, transparent 0deg 3.2deg, rgba(255, 255, 255, 0.55) 3.4deg 3.7deg, transparent 3.9deg 7deg);
+  -webkit-mask-image: radial-gradient(ellipse at center, transparent 32%, rgba(0, 0, 0, 0.9) 70%);
+  mask-image: radial-gradient(ellipse at center, transparent 32%, rgba(0, 0, 0, 0.9) 70%);
+}
 #vignette,
 #flash,
 #hurt {

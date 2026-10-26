@@ -225,6 +225,35 @@ try {
   await page.evaluate(() => window.__game.renderer.render(window.__game.scene, window.__game.camera));
   await page.screenshot({ path: `${OUT}/02b-after-pull.png` });
 
+  // 斬擊命中瞬間的特效截圖（頓點中）
+  await page.evaluate(() => {
+    const g = window.__game;
+    g.restart(true);
+    g.renderer.setAnimationLoop(null);
+    g.pc.speedScale = 1;
+    g.titan.attackCooldown = 99;
+    const V = g.pc.pos.constructor;
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    g.step(1 / 60, base());
+    const n = g.titan.napeWorld(new V());
+    const f = g.titan.forward;
+    g.pc.pos.set(n.x - f.x * 9 + 2, n.y + 1, n.z - f.z * 9);
+    g.pc.vel.set(f.x * 40, 0, f.z * 40);
+    g.rig.yaw = Math.atan2(-f.x, -f.z);
+    g.rig.pitch = -0.1;
+    for (let i = 0; i < 4; i++) g.step(1 / 60, base());
+    g.pc.pos.set(n.x - f.x * 4, n.y + 0.5, n.z - f.z * 4);
+    g.strikeCooldown = 0;
+    g._strike();
+    for (let i = 0; i < 6; i++) g.frame();
+    g.renderer.render(g.scene, g.camera);
+    window.__hitInfo = { hitStop: g.hitStop, slowMo: g.slowMo, burst: g.burst };
+  });
+  await page.screenshot({ path: `${OUT}/03b-hit.png` });
+  const hitInfo = await page.evaluate(() => window.__hitInfo);
+  check('nape hit triggers hit-stop + slow motion + speed burst', hitInfo.slowMo > 0 && hitInfo.burst > 0.3, JSON.stringify(hitInfo));
+  await page.evaluate(() => window.__game.restart(true));
+
   // 4) 高速從巨人背後接近並斬擊
   const fight = await page.evaluate(() => {
     const g = window.__game;
@@ -361,6 +390,27 @@ try {
   await mp.waitForFunction(() => !window.__game.pc.anyAttached, null, { timeout: 10000 }).catch(() => {});
   const tap2 = await mp.evaluate(() => !window.__game.pc.anyAttached);
   check('mobile: second tap releases the rope', tap2);
+  // 鉤住時「點一下但手指滑了一點」（25px、很快放開）→ 要算放索，不能射出新鉤子
+  await mp.evaluate(() => window.__game.restart(true));
+  await mp.waitForTimeout(300);
+  await mp.evaluate(() => {
+    const g = window.__game;
+    g.rig.pitch = 0.35;
+    g.rig.yaw -= 0.12;
+    window.__fired = 0;
+    g.pc.__origFire = g.pc.__origFire || g.pc.fireHook.bind(g.pc);
+    g.pc.fireHook = (...a) => (window.__fired++, g.pc.__origFire(...a));
+  });
+  await mp.waitForFunction(() => !!window.__game.aims.auto, null, { timeout: 30000 }).catch(() => {});
+  await mp.touchscreen.tap(cx, cy);
+  await mp.waitForFunction(() => window.__game.pc.anyAttached, null, { timeout: 30000 }).catch(() => {});
+  await mp.dispatchEvent('.t-hook', 'pointerdown', { pointerId: 9, isPrimary: true, clientX: cx, clientY: cy });
+  await mp.dispatchEvent('.t-hook', 'pointermove', { pointerId: 9, isPrimary: true, clientX: cx + 18, clientY: cy - 18 });
+  await mp.dispatchEvent('.t-hook', 'pointerup', { pointerId: 9, isPrimary: true, clientX: cx + 18, clientY: cy - 18 });
+  await mp.waitForFunction(() => !window.__game.pc.anyAttached, null, { timeout: 10000 }).catch(() => {});
+  const sloppy = await mp.evaluate(() => ({ fired: window.__fired, attached: window.__game.pc.anyAttached }));
+  check('mobile: a slightly sloppy tap while hooked releases (no new hook fired)', sloppy.fired === 1 && !sloppy.attached, JSON.stringify(sloppy));
+
   // 鋼索鈕＝準心搖桿：拖曳時準心在畫面上移動（鏡頭不轉），放開 → 朝準心發射，準心回到中央
   await mp.evaluate(() => window.__game.restart(true));
   await mp.waitForTimeout(300);

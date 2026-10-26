@@ -251,9 +251,68 @@ class SlashArcs {
       if (!it.m.visible) continue;
       it.t -= dt;
       const k = Math.max(0, it.t / it.max);
-      it.m.material.opacity = k * 0.85;
+      it.m.material.opacity = k * 0.5;
       it.m.scale.setScalar(it.s * (1.3 - 0.3 * k));
       if (it.t <= 0) it.m.visible = false;
+    }
+  }
+}
+
+/**
+ * 刀光線：命中時劃過弱點的長條發光線（面向鏡頭的細長平面，沿刀路方向）。
+ * 先快速伸長，再變細淡出。
+ */
+class BladeStreaks {
+  constructor(scene) {
+    this.items = [];
+    const geo = new THREE.PlaneGeometry(1, 1);
+    for (let i = 0; i < 8; i++) {
+      const m = new THREE.Mesh(
+        geo,
+        new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false }),
+      );
+      m.visible = false;
+      m.renderOrder = 10;
+      scene.add(m);
+      this.items.push({ m, t: 0, max: 0.3, center: new THREE.Vector3(), dir: new THREE.Vector3(), len: 1, width: 0.3 });
+    }
+    this.i = 0;
+    this._a = new THREE.Vector3();
+    this._b = new THREE.Vector3();
+  }
+
+  spawn(center, dir, len, width, color, life = 0.32) {
+    const it = this.items[this.i];
+    this.i = (this.i + 1) % this.items.length;
+    it.center.copy(center);
+    it.dir.copy(dir).normalize();
+    it.len = len;
+    it.width = width;
+    it.t = it.max = life;
+    it.m.material.color.set(color);
+    it.m.visible = true;
+  }
+
+  update(dt, camera) {
+    for (const it of this.items) {
+      if (!it.m.visible) continue;
+      it.t -= dt;
+      if (it.t <= 0) {
+        it.m.visible = false;
+        continue;
+      }
+      const age = it.max - it.t;
+      const grow = Math.min(1, 0.75 + age / 0.08); // 一出現就接近全長（頓點停格時也看得到）
+      const k = it.t / it.max;
+      it.m.position.copy(it.center);
+      it.m.lookAt(camera.position);
+      // 依刀路在螢幕上的方向旋轉
+      this._a.copy(it.center).addScaledVector(it.dir, -it.len / 2).project(camera);
+      this._b.copy(it.center).addScaledVector(it.dir, it.len / 2).project(camera);
+      const ang = Math.atan2(this._b.y - this._a.y, (this._b.x - this._a.x) * camera.aspect);
+      it.m.rotateZ(ang);
+      it.m.scale.set(it.len * grow * (1 + (1 - k) * 0.25), it.width * Math.max(0.15, k), 1);
+      it.m.material.opacity = Math.min(1, k * 1.6);
     }
   }
 }
@@ -265,13 +324,14 @@ export class Effects {
     this.speedLines = new SpeedLines(scene, cfg.speedLines);
     this.ropes = { left: new RopeVisual(scene, '#9fb8c8'), right: new RopeVisual(scene, '#c8b89f') };
     this.slashes = new SlashArcs(scene);
+    this.streaks = new BladeStreaks(scene);
     // 鉤爪命中閃光
     this.flashes = [];
     for (let i = 0; i < 4; i++) {
       const m = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
       m.visible = false;
       scene.add(m);
-      this.flashes.push({ m, t: 0 });
+      this.flashes.push({ m, t: 0, max: 0.18, size: 1 });
     }
     this.fi = 0;
   }
@@ -287,7 +347,9 @@ export class Effects {
     this.fi = (this.fi + 1) % this.flashes.length;
     f.m.position.copy(point);
     f.m.visible = true;
-    f.t = 0.18;
+    f.t = f.max = 0.18;
+    f.size = 1;
+    f.m.material.color.set('#ffffff');
     for (let i = 0; i < 14; i++) {
       this.glow.spawn({ x: point.x, y: point.y, z: point.z, vx: (Math.random() - 0.5) * 18, vy: (Math.random() - 0.2) * 14, vz: (Math.random() - 0.5) * 18, max: 0.25 + Math.random() * 0.2, s0: 0.25, s1: 0.05, r: 1, g: 0.8, b: 0.45, grav: 20, drag: 2 });
     }
@@ -323,15 +385,53 @@ export class Effects {
     this.slashes.spawn(pos, dir, Math.PI + 0.6 * side, big ? 1.3 : 0.75, color);
   }
 
-  /** 命中弱點：蒸氣與火花 */
+  /** 命中點的大閃光 */
+  burst(point, size, color, life = 0.22) {
+    const f = this.flashes[this.fi];
+    this.fi = (this.fi + 1) % this.flashes.length;
+    f.m.position.copy(point);
+    f.m.visible = true;
+    f.t = f.max = life;
+    f.size = size;
+    f.m.material.color.set(color);
+  }
+
+  /** 斬擊命中：交叉的長刀光線（白色核心 + 紅色外層） */
+  bladeHit(point, dir, big) {
+    const up = _v.set(0, 1, 0);
+    const side = _v2.crossVectors(dir, up);
+    if (side.lengthSq() < 1e-4) side.set(1, 0, 0);
+    side.normalize();
+    const len = big ? 13 : 9;
+    // 兩刀：一刀斜下、一刀斜上，交叉成 X
+    for (const tilt of [0.45, -0.35]) {
+      const d = side.clone().multiplyScalar(Math.cos(tilt)).addScaledVector(up, Math.sin(tilt));
+      this.streaks.spawn(point, d, len * 1.05, big ? 0.6 : 0.45, '#ff3a2a', 0.38);
+      this.streaks.spawn(point, d, len, big ? 0.2 : 0.14, '#ffffff', 0.32);
+    }
+  }
+
+  /** 衝刺斬的殘光 */
+  trail(pos) {
+    for (let i = 0; i < 3; i++) {
+      this.glow.spawn({ x: pos.x + (Math.random() - 0.5) * 0.4, y: pos.y + 0.3 + (Math.random() - 0.5) * 0.6, z: pos.z + (Math.random() - 0.5) * 0.4, vx: 0, vy: 0, vz: 0, max: 0.25, s0: 0.7, s1: 0.1, r: 0.6, g: 0.85, b: 1, a: 0.8 });
+    }
+  }
+
+  /** 命中弱點：蒸氣、火花與噴血 */
   napeHit(point, dir, big) {
-    const n = big ? 50 : 28;
+    const n = big ? 80 : 45;
     for (let i = 0; i < n; i++) {
       this.glow.spawn({ x: point.x, y: point.y, z: point.z, vx: dir.x * 15 + (Math.random() - 0.5) * 26, vy: (Math.random() - 0.3) * 20, vz: dir.z * 15 + (Math.random() - 0.5) * 26, max: 0.3 + Math.random() * 0.4, s0: 0.45, s1: 0.05, r: 1, g: 0.45 + Math.random() * 0.3, b: 0.2, grav: 18, drag: 1.5 });
     }
     for (let i = 0; i < n * 0.6; i++) {
       this.smoke.spawn({ x: point.x, y: point.y, z: point.z, vx: (Math.random() - 0.5) * 8, vy: 2 + Math.random() * 6, vz: (Math.random() - 0.5) * 8, max: 1.2 + Math.random(), s0: 0.6, s1: 2.6, r: 0.95, g: 0.93, b: 0.92, a: 0.45, drag: 1.2 });
       this.smoke.spawn({ x: point.x, y: point.y, z: point.z, vx: (Math.random() - 0.5) * 10, vy: (Math.random() - 0.2) * 8, vz: (Math.random() - 0.5) * 10, max: 0.6, s0: 0.5, s1: 1.2, r: 0.75, g: 0.1, b: 0.08, a: 0.8, grav: 10, drag: 1 });
+    }
+    // 沿刀路方向噴出的大量血花
+    for (let i = 0; i < n; i++) {
+      const sp = 10 + Math.random() * 22;
+      this.smoke.spawn({ x: point.x, y: point.y, z: point.z, vx: dir.x * sp + (Math.random() - 0.5) * 12, vy: 4 + Math.random() * 12, vz: dir.z * sp + (Math.random() - 0.5) * 12, max: 0.7 + Math.random() * 0.5, s0: 0.35 + Math.random() * 0.5, s1: 0.9, r: 0.7 + Math.random() * 0.2, g: 0.04, b: 0.05, a: 0.95, grav: 22, drag: 0.8 });
     }
   }
 
@@ -342,16 +442,18 @@ export class Effects {
     }
   }
 
-  update(dt, pc, model) {
+  update(dt, pc, model, camera) {
     this.glow.update(dt);
     this.smoke.update(dt);
     this.speedLines.update(dt, pc.pos, pc.vel, pc.speed > 1e-3 ? pc.feelSpeed / pc.speed : 1);
     this.slashes.update(dt);
+    if (camera) this.streaks.update(dt, camera);
     for (const f of this.flashes) {
       if (!f.m.visible) continue;
       f.t -= dt;
-      f.m.scale.setScalar(0.3 + (0.18 - f.t) * 6);
-      f.m.material.opacity = Math.max(0, f.t / 0.18);
+      const k = Math.max(0, f.t / f.max);
+      f.m.scale.setScalar(f.size * (0.3 + (1 - k) * 1.1));
+      f.m.material.opacity = k;
       if (f.t <= 0) f.m.visible = false;
     }
     for (const side of ['left', 'right']) {

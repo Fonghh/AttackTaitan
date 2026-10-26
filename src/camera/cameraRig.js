@@ -24,10 +24,16 @@ export class CameraRig {
     this.extraDist = 0;
     this.extraFov = 0;
     this.shake = 0;
+    this.fovKick = 0;
     this.lastManualLook = -10;
     this.distSmooth = this.cfg.camera.distance;
     this.time = 0;
     this.followDir.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+  }
+
+  /** 鏡頭推拉：負值＝往前推（視角變窄），正值＝拉寬，之後自動回復 */
+  kick(deg) {
+    this.fovKick += deg;
   }
 
   addShake(a) {
@@ -135,7 +141,8 @@ export class CameraRig {
 
     // FOV：直立手機保證最小水平視角
     const aspect = cam.aspect;
-    let vfov = C.fov + this.extraFov;
+    this.fovKick *= Math.exp(-7 * dt);
+    let vfov = C.fov + this.extraFov + this.fovKick;
     const minV = (2 * Math.atan(Math.tan((C.minHFov * Math.PI) / 360) / aspect) * 180) / Math.PI;
     vfov = Math.min(C.maxVFov, Math.max(vfov, minV + this.extraFov * 0.5));
     if (Math.abs(cam.fov - vfov) > 0.01) {
