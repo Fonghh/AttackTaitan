@@ -22,6 +22,7 @@ export class Hook {
     this.taut = false;
     this.attachTime = 0; // 勾住了多久
     this.pullOn = true; // 拉索模式：是否正在拉
+    this.slack = false; // 衝刺衝過勾點後鋼索放鬆（再按衝刺才會重新拉緊）
   }
 
   get attached() {
@@ -75,6 +76,7 @@ export class Hook {
       this.state = 'attached';
       this.attachTime = 0;
       this.pullOn = true;
+      this.slack = false;
       this.length = Math.max(1, dist * initialSlack);
       return true;
     }

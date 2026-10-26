@@ -212,3 +212,27 @@ test('pull style: releasing while rising launches the player upward', () => {
   const P = CONFIG.hook.pull;
   assert.ok(Math.abs(p.vel.y - (vy * (1 + P.launchBonus) + P.launchUp)) < 1e-6);
 });
+
+test('dash (fast reel): faster than the normal pull and flies up past the anchor without breaking the rope', () => {
+  const run = (dash) => {
+    const p = new PlayerController(CONFIG);
+    p.speedScale = CONFIG.player.defaultSpeedScale; // 遊戲預設速度倍率（衝刺倍率獨立）
+    p.pos.set(0, 20, 40);
+    p.fireHook('right', p.pos.clone(), anchorAt(0, 50, 0));
+    let maxSpeed = 0, maxY = 0, arrived = false;
+    for (let i = 0; i < 240; i++) {
+      p.update(1 / 60, { ...idle(), boost: dash, boostPressed: dash && i === 0 }, world());
+      maxSpeed = Math.max(maxSpeed, p.speed);
+      maxY = Math.max(maxY, p.pos.y);
+      if (p.events.some((e) => e.type === 'dashArrive')) arrived = true;
+      p.events.length = 0;
+    }
+    return { maxSpeed, maxY, arrived, attached: p.hooks.right.attached };
+  };
+  const normal = run(false);
+  const dash = run(true);
+  assert.ok(dash.maxSpeed > normal.maxSpeed + 5, `dash ${dash.maxSpeed.toFixed(1)} vs pull ${normal.maxSpeed.toFixed(1)} m/s`);
+  assert.ok(dash.arrived, 'reached the anchor while dashing');
+  assert.ok(dash.maxY > 50 + 10, `flew up past the anchor to ${dash.maxY.toFixed(1)}m (anchor 50m)`);
+  assert.ok(dash.attached, 'rope is still attached (slack, not broken)');
+});

@@ -72,6 +72,18 @@ export const CONFIG = {
     },
   },
 
+  // 衝刺（原「加速」）：鉤住時按住＝快速捲收鋼索，衝到勾點時鋼索放鬆，帶著速度衝過頭往上飛
+  dash: {
+    speed: 70, // 衝刺最高速度（m/s）× 衝刺倍率
+    accel: 120, // 衝刺拉力（m/s²）
+    defaultScale: 0.6, // 衝刺倍率預設值（暫停選單可調 10%～200%）
+    sideDamp: 3, // 衝刺時側向速度收斂（路線比較直）
+    gasUse: 22, // 每秒消耗氣體
+    slackExtra: 30, // 衝到勾點後鋼索放鬆，繩長 = 當下距離 + 這麼多
+    launchBonus: 0.2, // 衝到勾點時向上速度加成
+    launchUp: 6,
+  },
+
   boost: {
     accel: 36,
     gasMax: 100,

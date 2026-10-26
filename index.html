@@ -50,7 +50,7 @@
             <li><b>左鍵或右鍵點一下</b> 勾住（被拉過去），再點一下＝放索往上衝（雙索模式：左右鍵各一條）</li>
             <li><b>WASD</b> 跑步／空中轉向</li>
             <li><b>Space</b> 跳躍；勾住時捲收；空中噴氣上升</li>
-            <li><b>Shift</b> 加速（勾住時沿擺盪方向加速）</li>
+            <li><b>Shift</b> 衝刺：勾住時快速捲收鋼索，衝到勾點會衝過頭往上飛；沒勾住時噴氣前進</li>
             <li><b>E / F</b> 斬擊　<b>Q</b> 解除全部鋼索</li>
             <li><b>R</b> 重新開始　<b>Esc</b> 暫停　<b>H</b> 說明</li>
           </ul>
@@ -60,7 +60,7 @@
             <li>「鋼索」鈕＝準心搖桿：按住拖曳移動準心，放開＝朝準心發射（勾住時直接換勾點）</li>
             <li>點一下「鋼索」：沒勾住＝朝中央發射，勾住＝放索往上衝</li>
             <li>鉤住時鏡頭會轉到人物面朝的方向；空白處拖曳可手動轉視角</li>
-            <li>右上 加速、右下 斬擊</li>
+            <li>右下角：衝刺（勾住時按住＝快速捲收、衝過勾點往上飛）、斬擊、鋼索</li>
           </ul>
           <h3>斬擊條件</h3>
           <p>距後頸 ≤ 7m、速度 ≥ 20 m/s、從後方或側面接近。差一點時按斬擊會自動衝刺。速度越快傷害越高。</p>
@@ -76,7 +76,7 @@
       <ol class="steps">
         <li>準星對準高樓上方，點<b>滑鼠鍵</b>（手機：按住<b>鋼索</b>拖曳瞄準、放開發射）勾住，會被拉過去</li>
         <li>用 <b>WASD／搖桿</b>往旁邊帶，往上衝時<b>再點一下</b>放索，慣性帶你衝過屋頂（準星變紅＝沒有勾點）</li>
-        <li><b>Shift／加速</b>噴氣提速，繞到巨人<b>後方</b></li>
+        <li>勾住後按住 <b>Shift／衝刺</b>快速捲收，衝過勾點往上飛，繞到巨人<b>後方</b></li>
         <li>準星旁的弱點標記變<b>綠</b>時按 <b>E／斬擊</b></li>
       </ol>
       <button id="btn-start" class="primary">開始遊戲</button>
@@ -90,6 +90,7 @@
       <button id="btn-style">鋼索手感：拉索（勾住被拉過去）</button>
       <button id="btn-mode">鋼索：單索（按住擺盪）</button>
       <div class="speed-row"><button id="spd-down" aria-label="速度降低">−</button><span id="spd-val">速度 100%</span><button id="spd-up" aria-label="速度提高">＋</button></div>
+      <div class="speed-row"><button id="dash-down" aria-label="衝刺速度降低">−</button><span id="dash-val">衝刺 60%</span><button id="dash-up" aria-label="衝刺速度提高">＋</button></div>
       <button id="btn-hookfollow">鉤住時鏡頭跟隨人物：開</button>
       <button id="btn-follow">鏡頭跟隨飛行方向：開</button>
       <button id="btn-mute">音效：開</button>

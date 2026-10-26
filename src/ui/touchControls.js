@@ -18,7 +18,7 @@ export class TouchControls {
     root.innerHTML = `
       <div class="joy-base" hidden><div class="joy-knob"></div></div>
       <button class="tbtn t-pause" data-act="pause" aria-label="暫停">II</button>
-      <button class="tbtn t-boost" data-act="boost">加速</button>
+      <button class="tbtn t-boost" data-act="boost">衝刺</button>
       <div class="aim-stick" hidden><div class="aim-knob"></div></div>
       <button class="tbtn t-hook" data-hold="auto"><span>鋼索</span><small>拖曳瞄準</small></button>
       <button class="tbtn t-hookL" data-hold="left">左鉤</button>
@@ -89,7 +89,7 @@ export class TouchControls {
     this.btn.right.classList.toggle('on', r);
     this.btn.auto.classList.toggle('on', l || r);
     this.btn.auto.classList.toggle('no-target', !canHook && !(l || r));
-    this.btn.boost.classList.toggle('on', pc.boosting);
+    this.btn.boost.classList.toggle('on', pc.boosting || pc.dashing);
     this.btn.boost.style.setProperty('--gas', `${(pc.gas / this.cfg.boost.gasMax) * 100}%`);
   }
 

@@ -69,6 +69,7 @@ export class Game {
     this.cameraFollow = this._load('cameraFollow2', cfg.camera.autoFollow ? 'on' : 'off') === 'on';
     this.pc.ropeStyle = this._load('ropeStyle', cfg.hook.style);
     this.hookFollow = this._load('hookFollow', cfg.camera.hookFollow ? 'on' : 'off') === 'on';
+    this.pc.dashScale = Math.max(0.1, Math.min(2, Number(this._load('dashScale', String(cfg.dash.defaultScale))) || cfg.dash.defaultScale));
     this.pc.speedScale = Math.max(0.1, Math.min(1.5, Number(this._load('speedScale2', String(cfg.player.defaultSpeedScale))) || cfg.player.defaultSpeedScale));
     this.touchUI.setMode(this.hookMode);
 
@@ -118,6 +119,13 @@ export class Game {
       this._save('speedScale2', String(this.pc.speedScale));
       this._syncModeLabel();
     };
+    const setDash = (d) => {
+      this.pc.dashScale = Math.round(Math.max(0.1, Math.min(2, this.pc.dashScale + d)) * 10) / 10;
+      this._save('dashScale', String(this.pc.dashScale));
+      this._syncModeLabel();
+    };
+    $('dash-down').addEventListener('click', () => setDash(-0.1));
+    $('dash-up').addEventListener('click', () => setDash(0.1));
     $('spd-down').addEventListener('click', () => setSpeed(-0.1));
     $('spd-up').addEventListener('click', () => setSpeed(0.1));
     $('btn-follow').addEventListener('click', () => {
@@ -141,6 +149,7 @@ export class Game {
     document.getElementById('btn-style').textContent = this.pc.ropeStyle === 'pull' ? '鋼索手感：拉索（勾住被拉過去）' : '鋼索手感：擺盪（鐘擺）';
     document.getElementById('btn-hookfollow').textContent = this.hookFollow ? '鉤住時鏡頭跟隨人物：開' : '鉤住時鏡頭跟隨人物：關';
     document.getElementById('spd-val').textContent = `速度 ${Math.round(this.pc.speedScale * 100)}%`;
+    document.getElementById('dash-val').textContent = `衝刺 ${Math.round(this.pc.dashScale * 100)}%（${Math.round(this.cfg.dash.speed * this.pc.dashScale)} m/s）`;
     document.getElementById('btn-follow').textContent = this.cameraFollow ? '鏡頭跟隨飛行方向：開' : '鏡頭跟隨飛行方向：關';
     document.body.classList.toggle('dual', this.hookMode === 'dual');
   }
@@ -491,7 +500,7 @@ export class Game {
 
     // 特效
     this.fx.update(dt, pc, this.model);
-    if (pc.boosting) this.fx.gasPuff(pc.pos, pc.vel, true);
+    if (pc.boosting || pc.dashing) this.fx.gasPuff(pc.pos, pc.vel, true);
     if (pc.sliding) this.fx.dust(pc.pos, pc.vel, 1);
     if (!titan.alive) {
       titan.chest.getWorldPosition(_v);
@@ -500,7 +509,7 @@ export class Game {
       this.fx.steam(this.napePos, 1);
     }
 
-    this.audio.update(pc.feelSpeed, pc.boosting, pc.reeling, pc.anyAttached);
+    this.audio.update(pc.feelSpeed, pc.boosting || pc.dashing, pc.dashing ? 1 : 0, pc.anyAttached);
     this.hud.update(dt, {
       pc,
       titan,
@@ -591,6 +600,14 @@ export class Game {
           this.rig.addShake(0.12);
           this.fx.gasPuff(this.pc.pos, this.pc.vel, true);
         }
+        break;
+      case 'dash':
+        this.audio.play('boost');
+        break;
+      case 'dashArrive':
+        this.audio.play('fling');
+        this.rig.addShake(0.15);
+        this.fx.gasPuff(this.pc.pos, this.pc.vel, true);
         break;
       case 'arrive':
         this.audio.play('hookRelease');

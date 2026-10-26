@@ -165,6 +165,38 @@ try {
   check('[pull] rope stays attached until tapped again; release launches upward', pull.events.includes('arrive') && pull.events.includes('fling'), pull.events.join(','));
   check('[pull] flies over the roof and keeps going', pull.events.includes('vault') && pull.maxY > pull.anchorY + 8 && pull.travel > 80, `peak ${pull.maxY.toFixed(0)}m (anchor ${pull.anchorY.toFixed(0)}m), travel ${pull.travel.toFixed(0)}m`);
   check('[pull] no teleport', pull.maxJump < 0.3, `${pull.maxJump.toFixed(2)}m`);
+  // 衝刺（快速捲收）：勾住街邊大樓上緣後按住衝刺 → 衝過勾點往上飛，鋼索不斷
+  const dash = await page.evaluate(() => {
+    const g = window.__game;
+    g.restart(true);
+    g.renderer.setAnimationLoop(null);
+    g.pc.speedScale = g.cfg.player.defaultSpeedScale;
+    g.pc.dashScale = g.cfg.dash.defaultScale;
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    const run = (it) => { for (const e of it.events) g._handleEvent(e); g.step(1 / 60, it); };
+    for (let i = 0; i < 50; i++) run({ ...base(), move: { x: 0, y: 1 } });
+    g.rig.pitch = 0.35;
+    g.rig.yaw -= 0.12;
+    for (let i = 0; i < 3; i++) run(base());
+    const anchorY = g.aims.auto ? g.aims.auto.point.y : 0;
+    run({ ...base(), events: ['down:left'] });
+    for (let i = 0; i < 10; i++) run(base());
+    const ev = new Set();
+    const orig = g._onPlayerEvent.bind(g);
+    g._onPlayerEvent = (e) => (ev.add(e.type), orig(e));
+    let maxY = 0, maxSp = 0;
+    for (let i = 0; i < 240; i++) {
+      run({ ...base(), boost: true, boostPressed: i === 0 });
+      maxY = Math.max(maxY, g.pc.pos.y);
+      maxSp = Math.max(maxSp, g.pc.speed);
+    }
+    g._onPlayerEvent = orig;
+    const out = { anchorY, maxY, maxSp, events: [...ev], attached: g.pc.anyAttached };
+    g.pc.speedScale = 1;
+    return out;
+  });
+  check('[dash] hold dash while hooked: fast reel, fly up past the anchor', dash.events.includes('dashArrive') && dash.maxY > dash.anchorY + 10, `peak ${dash.maxY.toFixed(0)}m (anchor ${dash.anchorY.toFixed(0)}m), max ${dash.maxSp.toFixed(0)} m/s, ${dash.events.join(',')}`);
+  check('[dash] rope does not break after dashing past the anchor', dash.attached || dash.events.includes('vault'), `attached=${dash.attached}`);
   // 低速倍率（20%）：拉力仍拉得動（有下限），速度上限照比例降
   const slow = await page.evaluate(() => {
     const g = window.__game;
@@ -398,6 +430,8 @@ try {
     return { snapped: false };
   });
   check('mobile: crosshair snaps to a nearby building corner/edge', snap.snapped, JSON.stringify(snap));
+  const dashBtn = await mp.evaluate(() => document.querySelector('.t-boost').textContent.trim());
+  check('mobile: boost button is now labelled 衝刺', dashBtn === '衝刺', dashBtn);
   // 速度倍率
   await mp.evaluate(() => window.__game.pause());
   await mp.tap('#spd-up');
@@ -407,6 +441,10 @@ try {
   const spdMin = await mp.evaluate(() => window.__game.pc.speedScale);
   check('speed can go down to 10%', spdMin === 0.1, String(spdMin));
   for (let i = 0; i < 4; i++) await mp.tap('#spd-up');
+  await mp.tap('#dash-up');
+  const dashCfg = await mp.evaluate(() => ({ s: window.__game.pc.dashScale, label: document.getElementById('dash-val').textContent }));
+  check('pause menu dash speed control', dashCfg.s === 0.7 && dashCfg.label.includes('70%'), JSON.stringify(dashCfg));
+  await mp.tap('#dash-down');
   await mp.tap('#spd-down');
   await mp.tap('#btn-resume');
   await mp.screenshot({ path: `${OUT}/05-mobile.png` });
