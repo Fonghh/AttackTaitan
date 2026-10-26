@@ -18,6 +18,20 @@ npm test           # 物理與斬擊判定的單元測試（Node 內建 test run
 npm run smoke      # 先 build，再用 Playwright 實際啟動遊戲跑完整流程並截圖
 ```
 
+## 關卡
+
+開始畫面是關卡列表。每關最多 3 顆星，過關（至少 1 顆星）才會解鎖下一關；成績存在瀏覽器裡（`localStorage`）。
+換關會重新載入頁面（網址 `?level=關卡代號`），場景乾淨不殘留。
+
+| # | 關卡 | 代號 | 任務 | 星等條件 |
+| --- | --- | --- | --- | --- |
+| 1 | 訓練場 | `training` | 依序完成 6 個練習：勾索、放索上衝、衝刺、砍腳、斬後頸、兵長斬（木人不會攻擊、砍到剩 1 血會自己回滿） | 完成／180 秒內／90 秒內 |
+| 2 | 城區討伐 | `city` | 討伐 5 隻巨人 | 完成／300 秒內／沒有受傷 |
+| 3 | 空中競速 | `rings` | 依序穿過街道上空 12 個光圈（黃色圓圈＝下一個，畫面外有箭頭） | 完成／120 秒內／75 秒內 |
+| 4 | 巨木森林 | `forest` | 60～90m 巨木林中討伐 4 隻巨人 | 完成／300 秒內／沒有受傷 |
+
+關卡資料在 `src/levels/levels.js`（出生點、巨人、光圈、步驟、星等），任務邏輯在 `src/levels/mission.js`。
+
 ## 操作
 
 **鍵盤＋滑鼠**（按「開始遊戲」後滑鼠會鎖定在畫面中）
@@ -111,7 +125,9 @@ src/
   ui/touchControls.js       手機虛擬搖桿與按鈕
   fx/effects.js             粒子、速度流線、鋼索、刀光
   audio/audio.js            WebAudio 合成音效
-  world/city.js, textures.js 城市場景與程序化貼圖
+  world/city.js, textures.js 場景（城區／訓練場／巨木森林）與程序化貼圖
+  levels/levels.js          關卡定義、星等評分、進度存檔與解鎖
+  levels/mission.js         任務進行（訓練步驟、討伐、光圈）
 tests/
   physics.test.js           單元測試
   smoke.mjs                 Playwright 煙霧測試

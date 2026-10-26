@@ -37,7 +37,14 @@ try {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  // 關卡選單
   await page.goto(URL_BASE);
+  await page.waitForFunction(() => window.__game, null, { timeout: 20000 });
+  const menu = await page.evaluate(() => {
+    return [...document.querySelectorAll('#level-list .level-card')].map((b) => ({ name: b.querySelector('b').textContent, locked: b.disabled }));
+  });
+  check('[levels] menu lists 4 levels, only the first is unlocked at the start', menu.length === 4 && !menu[0].locked && menu.slice(1).every((m) => m.locked), JSON.stringify(menu));
+  await page.goto(`${URL_BASE}?level=city`);
   await page.waitForFunction(() => window.__game, null, { timeout: 20000 });
   await page.waitForTimeout(800);
   await page.screenshot({ path: `${OUT}/01-start.png` });
@@ -618,6 +625,68 @@ try {
   });
   await page.waitForTimeout(700);
   await page.screenshot({ path: `${OUT}/04-speed.png` });
+  // 其他關卡：訓練場、光圈競速、巨木森林
+  const levelRun = async (id, fn) => {
+    await page.goto(`${URL_BASE}?level=${id}`);
+    await page.waitForFunction(() => window.__game, null, { timeout: 20000 });
+    await page.evaluate(() => (window.__game.input.requestLock = () => {}));
+    await page.click('#btn-start');
+    return page.evaluate(fn);
+  };
+  const training = await levelRun('training', () => {
+    const g = window.__game;
+    g.renderer.setAnimationLoop(null);
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    const dummy = g.titans[0];
+    dummy.takeHit(999, true);
+    const survived = dummy.alive && dummy.hp >= 1;
+    for (let i = 0; i < 200; i++) g.step(1 / 60, base());
+    const regen = dummy.hp === g.cfg.titan.hp;
+    const texts = [g.hud.el.mission.textContent];
+    for (const s of ['hook', 'fling', 'dash', 'leg', 'nape', 'levi']) g._missionEvent(s);
+    texts.push(g.hud.el.mission.textContent);
+    for (let i = 0; i < 60; i++) g.step(1 / 60, base());
+    return { survived, regen, texts, state: g.state, title: document.getElementById('result-title').textContent, stars: document.querySelector('.result-stars')?.textContent, next: !document.getElementById('btn-next').hidden };
+  });
+  check('[training] wooden dummies never die and heal back', training.survived && training.regen, JSON.stringify(training));
+  check('[training] finishing all 6 steps completes the level, shows stars and unlocks the next level', training.state === 'won' && /★/.test(training.stars || '') && training.next, JSON.stringify(training));
+  const rings = await levelRun('rings', () => {
+    const g = window.__game;
+    g.renderer.setAnimationLoop(null);
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    // 光圈不能和建築重疊（含半徑）
+    const R = g.mission.ringRadius;
+    let worst = 1e9;
+    for (const r of g.mission.rings) {
+      for (const c of g.city.colliders) {
+        const dx = Math.max(c.min.x - r.x, 0, r.x - c.max.x), dy = Math.max(c.min.y - r.y, 0, r.y - c.max.y), dz = Math.max(c.min.z - r.z, 0, r.z - c.max.z);
+        worst = Math.min(worst, Math.hypot(dx, dy, dz) - R);
+      }
+    }
+    const marker = !document.getElementById('wp-marker').hidden || !document.getElementById('wp-arrow').hidden;
+    // 依序把玩家放到每個光圈中心
+    for (const r of g.mission.rings) {
+      g.pc.pos.copy(r);
+      g.pc.vel.set(0, 0, 0);
+      g.step(1 / 60, base());
+    }
+    for (let i = 0; i < 60; i++) g.step(1 / 60, base());
+    return { clearance: +worst.toFixed(1), marker, passed: g.mission.ringIndex, total: g.mission.rings.length, state: g.state, noTitans: document.body.classList.contains('no-titans') };
+  });
+  check('[rings] 12 rings, none overlapping buildings', rings.total === 12 && rings.clearance > 0.5, JSON.stringify(rings));
+  check('[rings] passing every ring in order finishes the course', rings.passed === 12 && rings.state === 'won' && rings.noTitans, JSON.stringify(rings));
+  const forest = await levelRun('forest', () => {
+    const g = window.__game;
+    g.renderer.setAnimationLoop(null);
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    for (let i = 0; i < 30; i++) g.step(1 / 60, base());
+    const trees = g.city.hookables.filter((m) => m.geometry.type === 'CylinderGeometry' && m.userData.building).length;
+    const inside = g.titans.filter((t) => g.city.colliders.some((c) => t.root.position.x > c.min.x && t.root.position.x < c.max.x && t.root.position.z > c.min.z && t.root.position.z < c.max.z)).length;
+    const aim = !!g.aims.auto;
+    return { trees, titans: g.titans.length, inside, aim, y: +g.pc.pos.y.toFixed(1) };
+  });
+  check('[forest] giant trees to hook, 4 titans in clearings, spawn on the platform', forest.trees > 40 && forest.titans === 4 && forest.inside === 0 && forest.y > 40 && forest.aim, JSON.stringify(forest));
+
   check('no console/page errors (desktop)', errors.length === 0, errors.slice(0, 3).join(' | '));
   await page.close(); // 關掉桌機頁面，避免背景持續渲染拖慢手機測試
 
@@ -626,7 +695,7 @@ try {
   const mp = await ctx.newPage();
   const merr = [];
   mp.on('pageerror', (e) => merr.push(e.message));
-  await mp.goto(`${URL_BASE}?touch`);
+  await mp.goto(`${URL_BASE}?touch&level=city`);
   await mp.waitForFunction(() => window.__game, null, { timeout: 60000 });
   await mp.tap('#btn-start');
   await mp.waitForTimeout(600);
@@ -670,14 +739,16 @@ try {
     g.pc.fireHook = (...a) => (window.__fired++, g.pc.__origFire(...a));
   });
   await mp.waitForFunction(() => !!window.__game.aims.auto, null, { timeout: 30000 }).catch(() => {});
+  const sloppyPre = await mp.evaluate(() => ({ aim: !!window.__game.aims.auto, state: window.__game.state, active: window.__game.pc.hooks.left.active || window.__game.pc.hooks.right.active, toast: document.getElementById('toast').textContent }));
   await mp.touchscreen.tap(cx, cy);
   await mp.waitForFunction(() => window.__game.pc.anyAttached, null, { timeout: 30000 }).catch(() => {});
+  sloppyPre.afterTap = await mp.evaluate(() => ({ fired: window.__fired, att: window.__game.pc.anyAttached }));
   await mp.dispatchEvent('.t-hook', 'pointerdown', { pointerId: 9, isPrimary: true, clientX: cx, clientY: cy });
   await mp.dispatchEvent('.t-hook', 'pointermove', { pointerId: 9, isPrimary: true, clientX: cx + 18, clientY: cy - 18 });
   await mp.dispatchEvent('.t-hook', 'pointerup', { pointerId: 9, isPrimary: true, clientX: cx + 18, clientY: cy - 18 });
   await mp.waitForFunction(() => !window.__game.pc.anyAttached, null, { timeout: 10000 }).catch(() => {});
   const sloppy = await mp.evaluate(() => ({ fired: window.__fired, attached: window.__game.pc.anyAttached }));
-  check('mobile: a slightly sloppy tap while hooked releases (no new hook fired)', sloppy.fired === 1 && !sloppy.attached, JSON.stringify(sloppy));
+  check('mobile: a slightly sloppy tap while hooked releases (no new hook fired)', sloppy.fired === 1 && !sloppy.attached, JSON.stringify({ ...sloppy, sloppyPre }));
 
   // 鋼索鈕＝準心搖桿：拖曳時準心在畫面上移動（鏡頭不轉），放開 → 朝準心發射，準心回到中央
   await mp.evaluate(() => window.__game.restart(true));

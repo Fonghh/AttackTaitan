@@ -33,6 +33,9 @@ export class Hud {
       hurt: $('hurt'),
       hang: $('hang-ind'),
       crosshair: $('crosshair'),
+      wp: $('wp-marker'),
+      wpDist: $('wp-dist'),
+      wpArrow: $('wp-arrow'),
     };
     this.toastTimer = 0;
   }
@@ -84,6 +87,41 @@ export class Hud {
     el.className = `show ${cls}`;
   }
 
+  /** 下一個目標點（光圈）：畫面內顯示圓圈，畫面外在邊緣顯示箭頭 */
+  _waypoint(wp, pc, camera) {
+    const e = this.el;
+    if (!wp) {
+      e.wp.hidden = e.wpArrow.hidden = true;
+      return;
+    }
+    const pos = this.project(wp, camera, {});
+    const dist = `${wp.distanceTo(pc.pos).toFixed(0)}m`;
+    const m = 30;
+    if (!pos.behind && pos.x > m && pos.x < innerWidth - m && pos.y > m && pos.y < innerHeight - m) {
+      e.wp.hidden = false;
+      e.wpArrow.hidden = true;
+      e.wp.style.left = `${pos.x}px`;
+      e.wp.style.top = `${pos.y}px`;
+      e.wpDist.textContent = dist;
+      return;
+    }
+    e.wp.hidden = true;
+    let dx = pos.x - innerWidth / 2;
+    let dy = pos.y - innerHeight / 2;
+    if (pos.behind) {
+      dx = -dx;
+      dy = -dy;
+    }
+    const ang = Math.atan2(dy, dx);
+    const rx = innerWidth / 2 - 50, ry = innerHeight / 2 - 50;
+    const t = Math.min(rx / Math.abs(Math.cos(ang) || 1e-6), ry / Math.abs(Math.sin(ang) || 1e-6));
+    e.wpArrow.hidden = false;
+    e.wpArrow.style.left = `${innerWidth / 2 + Math.cos(ang) * t}px`;
+    e.wpArrow.style.top = `${innerHeight / 2 + Math.sin(ang) * t}px`;
+    e.wpArrow.style.transform = `translate(-50%,-50%) rotate(${ang}rad)`;
+    e.wpArrow.dataset.dist = dist;
+  }
+
   setMission(text) {
     this.el.mission.textContent = text;
   }
@@ -114,7 +152,7 @@ export class Hud {
       const el = side === 'left' ? e.ropeL : e.ropeR;
       el.className = `rope ${h.attached ? 'attached' : h.active ? 'flying' : ''}`;
     }
-    e.titanHp.style.width = `${(titan.hp / this.cfg.titan.hp) * 100}%`;
+    e.titanHp.style.width = `${(Math.max(0, titan.hp) / this.cfg.titan.hp) * 100}%`;
     e.titanHpText.textContent = titan.alive ? `${titan.name}（${Math.round(titan.height)}m）` : '討伐完成';
 
     // 鋼索預測標記
@@ -200,6 +238,8 @@ export class Hud {
       e.napeArrow.hidden = true;
       e.checks.hidden = true;
     }
+
+    this._waypoint(s.waypoint, pc, camera);
 
     // 速度暗角
     const v = Math.max(0, Math.min(1, (feel - 18) / 45));

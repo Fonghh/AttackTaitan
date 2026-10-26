@@ -1,6 +1,6 @@
 // 城市場景：天空、地面、可勾索的建築、外圍城牆、燈光與陰影。
 import * as THREE from 'three';
-import { facadeTexture, groundTexture, wallTexture, mulberry32 } from './textures.js';
+import { facadeTexture, groundTexture, wallTexture, barkTexture, mulberry32 } from './textures.js';
 
 const TILE = 32; // 外牆貼圖一張代表 32m（8 格 × 4m）
 
@@ -63,14 +63,18 @@ function makeSky() {
  * @param {{wallRadius:number, wallHeight:number}} cfg
  * @param {{x:number,z:number}} spawn
  * @param {boolean} lowSpec
+ * @param {'city'|'training'|'forest'} layout 地圖：城區／訓練場／巨木森林
+ * @param {{x:number,z:number,r:number}[]} clearings 森林裡要留空的地方（巨人地盤）
  */
-export function buildCity(scene, cfg, spawn, lowSpec) {
+export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings = []) {
   const colliders = [];
   const hookables = [];
+  const snapAnchors = [];
   const rnd = mulberry32(1234);
+  const forest = layout === 'forest';
 
-  scene.background = new THREE.Color('#a9cbe6');
-  scene.fog = new THREE.Fog('#b9cfe0', 140, 560);
+  scene.background = new THREE.Color(forest ? '#9fc2c8' : '#a9cbe6');
+  scene.fog = forest ? new THREE.Fog('#a8c3b4', 90, 430) : new THREE.Fog('#b9cfe0', 140, 560);
   scene.add(makeSky());
 
   // 燈光
@@ -95,19 +99,21 @@ export function buildCity(scene, cfg, spawn, lowSpec) {
   gtex.repeat.set(70, 70);
   const ground = new THREE.Mesh(
     new THREE.CircleGeometry(cfg.wallRadius + 20, 64).rotateX(-Math.PI / 2),
-    new THREE.MeshStandardMaterial({ map: gtex, roughness: 1 }),
+    new THREE.MeshStandardMaterial({ map: gtex, roughness: 1, color: forest ? '#7f9a66' : '#ffffff' }),
   );
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // 中央廣場（巨人活動區）
-  const plaza = new THREE.Mesh(
-    new THREE.CircleGeometry(55, 48).rotateX(-Math.PI / 2),
-    new THREE.MeshStandardMaterial({ color: '#9b927f', roughness: 1 }),
-  );
-  plaza.position.y = 0.02;
-  plaza.receiveShadow = true;
-  scene.add(plaza);
+  // 中央廣場（巨人活動區）；訓練場是一片沙地
+  if (layout !== 'forest') {
+    const plaza = new THREE.Mesh(
+      new THREE.CircleGeometry(layout === 'training' ? 75 : 55, 48).rotateX(-Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: layout === 'training' ? '#b9a27a' : '#9b927f', roughness: 1 }),
+    );
+    plaza.position.y = 0.02;
+    plaza.receiveShadow = true;
+    scene.add(plaza);
+  }
 
   // 建築材質
   const palettes = [
@@ -165,6 +171,74 @@ export function buildCity(scene, cfg, spawn, lowSpec) {
     return mesh;
   }
 
+  if (layout === 'city') buildStreets();
+  else if (layout === 'training') buildTraining();
+  else buildForest();
+
+  function buildTraining() {
+    // 起點台
+    addBuilding(spawn.x, spawn.z, 10, 10, spawn.y - 1, true);
+    // 內圈 8 根柱子（勾點）、外圈 6 棟高樓
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+      addBuilding(Math.sin(a) * 48, Math.cos(a) * 48, 8, 8, 32 + (i % 3) * 7, true);
+    }
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      addBuilding(Math.sin(a) * 105, Math.cos(a) * 105, 22, 22, 48 + (i % 2) * 14);
+    }
+  }
+
+  function buildForest() {
+    // 起點：高木台
+    addBuilding(spawn.x, spawn.z, 12, 12, spawn.y - 1, true);
+    const bark = new THREE.MeshStandardMaterial({ map: barkTexture(), roughness: 1 });
+    const leaves = [
+      new THREE.MeshStandardMaterial({ color: '#3f6b3a', roughness: 1, flatShading: true }),
+      new THREE.MeshStandardMaterial({ color: '#4d7a40', roughness: 1, flatShading: true }),
+    ];
+    const free = (x, z, r) =>
+      Math.hypot(x - spawn.x, z - spawn.z) > r + 12 && clearings.every((c) => Math.hypot(x - c.x, z - c.z) > c.r + r);
+    // 起點正前方幾棵樹：一開始準星就有東西可以勾
+    for (const [x, z, r, h] of [[5, 118, 5, 78], [-26, 128, 4.5, 72], [30, 100, 5, 84]]) addTree(x, z, r, h);
+    const step = 36;
+    for (let gx = -230; gx <= 230; gx += step) {
+      for (let gz = -230; gz <= 230; gz += step) {
+        const x = gx + (rnd() - 0.5) * step * 0.6;
+        const z = gz + (rnd() - 0.5) * step * 0.6;
+        const r = 3.5 + rnd() * 2.5;
+        if (Math.hypot(x, z) > cfg.wallRadius - 25 || !free(x, z, r)) continue;
+        if (Math.hypot(x - 5, z - 118) < 22 || Math.hypot(x + 26, z - 128) < 20 || Math.hypot(x - 30, z - 100) < 22) continue;
+        addTree(x, z, r, 60 + rnd() * 30);
+      }
+    }
+    function addTree(x, z, r, h) {
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.75, r * 1.15, h, 10), bark);
+      trunk.position.set(x, h / 2, z);
+      trunk.castShadow = trunk.receiveShadow = true;
+      trunk.userData.building = true;
+      scene.add(trunk);
+      hookables.push(trunk);
+      const half = r * 0.85; // 圓柱用略小的方塊當碰撞
+      colliders.push({ min: new THREE.Vector3(x - half, 0, z - half), max: new THREE.Vector3(x + half, h, z + half) });
+      // 樹冠（不能勾、不擋路，只是遮光與輪廓）
+      const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(r * 3.2, 0), leaves[Math.floor(rnd() * 2)]);
+      crown.position.set(x, h + r * 1.6, z);
+      crown.scale.y = 0.7;
+      crown.castShadow = !lowSpec;
+      scene.add(crown);
+      // 準心吸附點：樹幹四周的上段與中段
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2;
+        for (const k of [0.85, 0.6]) {
+          const rr = r * (1.15 - 0.4 * k) - 0.1;
+          snapAnchors.push({ pos: new THREE.Vector3(x + Math.sin(a) * rr, h * k, z + Math.cos(a) * rr), object: trunk });
+        }
+      }
+    }
+  }
+
+  function buildStreets() {
   // 8×8 街廓，中央 4 格留給廣場
   const cells = [-175, -125, -75, -25, 25, 75, 125, 175];
   for (const cx of cells) {
@@ -202,6 +276,7 @@ export function buildCity(scene, cfg, spawn, lowSpec) {
   };
   tower(-48, 48, 38);
   tower(48, -48, 44);
+  }
 
   // 外圍城牆（內側可勾索）
   const wtex = wallTexture();
@@ -235,7 +310,6 @@ export function buildCity(scene, cfg, spawn, lowSpec) {
   scene.updateMatrixWorld(true);
 
   // 準心吸附點：每棟建築的屋頂四角、屋頂邊緣中點、轉角直邊（上段與中段），略往內縮避免打在邊線外
-  const snapAnchors = [];
   for (const m of hookables) {
     const g = m.geometry.parameters;
     if (m.geometry.type !== 'BoxGeometry' || !g) continue;

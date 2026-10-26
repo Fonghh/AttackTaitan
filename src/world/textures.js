@@ -100,3 +100,25 @@ export function wallTexture() {
     }
   });
 }
+
+/** 樹皮：直向的深淺紋路 */
+export function barkTexture() {
+  const rnd = mulberry32(31);
+  const tex = canvasTexture(256, (g, S) => {
+    g.fillStyle = '#5a4130';
+    g.fillRect(0, 0, S, S);
+    for (let i = 0; i < 90; i++) {
+      const x = rnd() * S;
+      const w = 2 + rnd() * 6;
+      const v = 60 + rnd() * 40;
+      g.fillStyle = `rgb(${v + 20},${v},${v - 18})`;
+      g.fillRect(x, 0, w, S);
+    }
+    for (let i = 0; i < 400; i++) {
+      g.fillStyle = `rgba(0,0,0,${rnd() * 0.25})`;
+      g.fillRect(rnd() * S, rnd() * S, 2 + rnd() * 3, 6 + rnd() * 20);
+    }
+  });
+  tex.repeat.set(3, 6);
+  return tex;
+}

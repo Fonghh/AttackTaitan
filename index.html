@@ -37,6 +37,8 @@
 
       <div id="nape-marker" class="nape" hidden><div class="ring"></div><span id="nape-dist"></span><b class="go">斬！</b></div>
       <div id="nape-arrow" hidden></div>
+      <div id="wp-marker" hidden><span id="wp-dist"></span></div>
+      <div id="wp-arrow" hidden></div>
       <div id="strike-checks" hidden><span id="chk-dist"></span><span id="chk-speed"></span><span id="chk-angle"></span></div>
 
       <div id="toast"></div>
@@ -73,21 +75,27 @@
 
     <section id="start" class="panel">
       <h1>立體機動<span>高速斬擊</span></h1>
-      <p class="sub">射出鋼索、在高樓之間擺盪、累積速度，從背後斬斷巨人的後頸。</p>
-      <ol class="steps">
-        <li>準星對準高樓上方，點<b>滑鼠鍵</b>（手機：按住<b>鋼索</b>拖曳瞄準、放開發射）勾住，會被拉過去</li>
-        <li>用 <b>WASD／搖桿</b>往旁邊帶，往上衝時<b>再點一下</b>放索，慣性帶你衝過屋頂（準星變紅＝沒有勾點）</li>
-        <li>勾住後按住 <b>Shift／衝刺</b>快速捲收，衝過勾點往上飛，繞到巨人<b>後方</b></li>
-        <li>準星旁的弱點標記變<b>綠</b>時按 <b>E／斬擊</b></li>
-      </ol>
-      <button id="btn-start" class="primary">開始遊戲</button>
-      <p class="hint desktop-only">開始後滑鼠會鎖定在畫面中，按 Esc 暫停。</p>
+      <p class="sub">射出鋼索、在高樓之間擺盪、累積速度，從背後斬斷巨人的後頸。選擇關卡：</p>
+      <div id="level-list"></div>
+      <p class="hint">每關最多 3 顆星；過關（至少 1 顆星）才會解鎖下一關。</p>
+    </section>
+
+    <section id="brief" class="panel" hidden>
+      <h2 id="brief-title"></h2>
+      <p id="brief-text" class="sub"></p>
+      <ol id="brief-steps" class="steps"></ol>
+      <ul id="brief-stars" class="star-rules"></ul>
+      <p id="brief-best" class="hint"></p>
+      <button id="btn-start" class="primary">開始</button>
+      <button id="btn-levels">選擇其他關卡</button>
+      <p class="hint desktop-only">開始後滑鼠會鎖定在畫面中，按 Esc 暫停；H 顯示操作說明。</p>
     </section>
 
     <section id="pause" class="panel" hidden>
       <h2>暫停</h2>
       <button id="btn-resume" class="primary">繼續</button>
       <button data-restart>重新開始</button>
+      <button data-levels>選擇關卡</button>
       <button id="btn-style">鋼索手感：拉索（勾住被拉過去）</button>
       <button id="btn-mode">鋼索：單索（按住擺盪）</button>
       <div class="speed-row"><button id="spd-down" aria-label="速度降低">−</button><span id="spd-val">速度 100%</span><button id="spd-up" aria-label="速度提高">＋</button></div>
@@ -106,7 +114,9 @@
     <section id="result" class="panel" hidden>
       <h2 id="result-title">討伐成功</h2>
       <div id="result-body"></div>
-      <button data-restart class="primary">再來一次</button>
+      <button id="btn-next" class="primary" hidden>下一關</button>
+      <button data-restart>再來一次</button>
+      <button data-levels>選擇關卡</button>
     </section>
 
     <script type="module" src="/src/main.js"></script>

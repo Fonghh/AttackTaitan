@@ -25,7 +25,9 @@ export class Titan {
     this.scale = spawn.scale ?? 1;
     this.name = spawn.name ?? '巨人';
     // 每隻巨人自己的材質（受擊閃白、死亡淡出不會互相影響）
-    const tint = spawn.tint ?? '#d39a7c';
+    // 訓練用木人：木頭色、不會動、不會死（被砍到剩 1 血後自動恢復）
+    this.dummy = !!spawn.dummy;
+    const tint = spawn.tint ?? (this.dummy ? '#a8764a' : '#d39a7c');
     this.skin = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.75, flatShading: true, emissive: '#000000' });
     const dark = new THREE.MeshStandardMaterial({ color: new THREE.Color(tint).multiplyScalar(0.78), roughness: 0.8, flatShading: true });
     const hairMat = new THREE.MeshStandardMaterial({ color: spawn.hair ?? '#3a2a1f', roughness: 1, flatShading: true });
@@ -156,6 +158,7 @@ export class Titan {
     this.stunTimer = 0; // 眼睛被砍：暈眩
     this.kneelTimer = 0; // 腳被砍：跪下
     this.kneelAmount = 0;
+    this.regenTimer = 0;
     this.deadTime = 0;
     this.gone = false;
     this.holding = false;
@@ -209,7 +212,8 @@ export class Titan {
 
   takeHit(damage, isNape) {
     if (!this.alive) return;
-    this.hp = Math.max(0, this.hp - damage);
+    this.hp = Math.max(this.dummy ? 1 : 0, this.hp - damage);
+    this.regenTimer = 2.5;
     this.hitFlash = isNape ? 0.35 : 0.15;
     if (this.hp <= 0) {
       this._die();
@@ -222,7 +226,8 @@ export class Titan {
   /** 部位攻擊：'eye' 暈眩、'leg' 跪下 */
   takePartHit(partName, damage) {
     if (!this.alive) return;
-    this.hp = Math.max(0, this.hp - damage);
+    this.hp = Math.max(this.dummy ? 1 : 0, this.hp - damage);
+    this.regenTimer = 2.5;
     this.hitFlash = 0.2;
     if (this.hp <= 0) {
       this._die();
@@ -269,6 +274,16 @@ export class Titan {
     if (this.stunTimer > 0) this.stunTimer -= dt;
     if (this.kneelTimer > 0) this.kneelTimer -= dt;
     this.kneelAmount += ((this.kneelTimer > 0 ? 1 : 0) - this.kneelAmount) * Math.min(1, dt * 4);
+
+    if (this.dummy) {
+      // 木人：只回血、做受擊與跪下的姿勢，不追擊、不攻擊
+      if (this.regenTimer > 0 && (this.regenTimer -= dt) <= 0) this.hp = T.hp;
+      this.state = 'idle';
+      this.updatePose(dt, player);
+      this.root.updateMatrixWorld(true);
+      this._updateSpheres();
+      return;
+    }
 
     const pos = this.root.position;
     const dx = player.pos.x - pos.x;

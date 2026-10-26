@@ -10,6 +10,8 @@ import { Titan } from '../enemy/titan.js';
 import { evaluateStrike, canLunge, napeDamage } from '../combat/strike.js';
 import { Input, isTouchDevice } from '../input/input.js';
 import { Gyro } from '../input/gyro.js';
+import { LEVELS, getLevel, nextLevel, starText, evaluateStars, loadProgress, saveResult, isUnlocked } from '../levels/levels.js';
+import { Mission } from '../levels/mission.js';
 import { TouchControls } from '../ui/touchControls.js';
 import { Hud } from '../ui/hud.js';
 import { Effects } from '../fx/effects.js';
@@ -23,10 +25,37 @@ const _aimDir = new THREE.Vector3();
 /** 迴旋斬傷害：一般斬擊 × spinDamageBonus */
 const napeDamageSpin = (speed, cfg) => napeDamage(speed, cfg) * cfg.strike.spinDamageBonus;
 
+/** 沒有巨人的關卡（光圈競速）用的替身：永遠「已死亡」，讓目標相關的程式不用到處判斷 null */
+const NO_TITAN = {
+  alive: false,
+  state: 'dead',
+  hp: 0,
+  name: '',
+  height: 20,
+  scale: 1,
+  forward: new THREE.Vector3(0, 0, 1),
+  root: { position: new THREE.Vector3(0, -1000, 0) },
+  napeWorld: (out) => out.set(0, -1000, 0),
+};
+
+const storage = (() => {
+  try {
+    return localStorage;
+  } catch {
+    return null;
+  }
+})();
+
 export class Game {
   constructor(container) {
     const cfg = (this.cfg = CONFIG);
-    this.touch = isTouchDevice() || new URLSearchParams(location.search).has('touch');
+    const params = new URLSearchParams(location.search);
+    this.touch = isTouchDevice() || params.has('touch');
+    // 關卡：網址 ?level=xxx（換關＝重新載入頁面，場景乾淨不殘留）
+    this.level = getLevel(params.get('level')) || getLevel(this._load('lastLevel', 'training')) || LEVELS[0];
+    this.menuPanel = params.has('level') ? 'brief' : 'start';
+    this.progress = loadProgress(storage);
+    cfg.player.spawn = this.level.spawn;
     document.body.classList.toggle('touch', this.touch);
 
     // 渲染器
@@ -44,11 +73,15 @@ export class Game {
     this.camera = new THREE.PerspectiveCamera(cfg.camera.fov, innerWidth / innerHeight, 0.1, 1500);
 
     // 場景與角色
-    this.city = buildCity(this.scene, cfg.world, { x: cfg.player.spawn.x, z: cfg.player.spawn.z }, this.touch);
+    const L = this.level;
+    const clearings = L.titans.map((t) => ({ x: t.x, z: t.z, r: (t.homeRadius ?? 25) + 6 * (t.scale ?? 1) }));
+    this.city = buildCity(this.scene, cfg.world, L.spawn, this.touch, L.map, clearings);
     this.pc = new PlayerController(cfg);
     this.model = new PlayerModel(this.scene);
-    this.titans = cfg.titans.map((sp) => new Titan(this.scene, cfg, sp));
-    this.titan = this.titans[0]; // 目前的目標巨人（離玩家最近、活著的）
+    this.titans = L.titans.map((sp) => new Titan(this.scene, cfg, sp));
+    this.titan = this.titans[0] || NO_TITAN; // 目前的目標巨人（離玩家最近、活著的）
+    this.mission = new Mission(L, this.scene);
+    document.body.classList.toggle('no-titans', this.titans.length === 0);
     this.titanRoots = this.titans.map((t) => t.root);
     this.titanSpheres = this.titans.flatMap((t) => t.spheres);
 
@@ -63,7 +96,7 @@ export class Game {
     this.touchUI = new TouchControls(document.getElementById('touch'), this.input, cfg);
     this.touchUI.show(false);
 
-    this.spawnYaw = Math.atan2(cfg.player.spawn.x - cfg.titans[0].x, cfg.player.spawn.z - cfg.titans[0].z);
+    this.spawnYaw = Math.atan2(L.spawn.x - L.faceTo.x, L.spawn.z - L.faceTo.z);
     this.aims = { left: null, right: null, auto: null };
     this.autoSide = 'right';
     this.reticle = { x: 0, y: 0 }; // 準心在畫面上的位置（NDC，-1..1）
@@ -108,6 +141,14 @@ export class Game {
   _bindUI() {
     const $ = (id) => document.getElementById(id);
     $('btn-start').addEventListener('click', () => this.start());
+    $('btn-levels').addEventListener('click', () => this._renderLevels() || this.showPanel('start'));
+    for (const b of document.querySelectorAll('[data-levels]')) b.addEventListener('click', () => this._goLevel(null));
+    $('btn-next').addEventListener('click', () => {
+      const n = nextLevel(this.level.id);
+      if (n) this._goLevel(n.id);
+    });
+    this._renderLevels();
+    this._renderBrief();
     $('btn-resume').addEventListener('click', () => this.resume());
     for (const b of document.querySelectorAll('[data-restart]')) b.addEventListener('click', () => this.restart(true));
     $('btn-mode').addEventListener('click', () => {
@@ -264,7 +305,9 @@ export class Game {
     this.input.enabled = true;
     this.showPanel(null);
     this.touchUI.show(this.touch);
-    this.hud.toast('從高塔躍下，用鋼索擺盪接近巨人！', '', 2.5);
+    this._save('lastLevel', this.level.id);
+    const hint = { training: '照畫面上方的提示一步一步練習', rings: '跟著黃色圓圈與箭頭，依序穿過光圈！', kill: '從高處躍下，用鋼索擺盪接近巨人！' };
+    this.hud.toast(hint[this.level.objective === 'kill' ? 'kill' : this.level.objective], '', 2.5);
   }
 
   resume() {
@@ -292,10 +335,11 @@ export class Game {
     this.pc.grabbedBy = null;
     this.grab = null;
     for (const t of this.titans) t.reset();
-    this.titan = this.titans[0];
+    this.titan = this.titans[0] || NO_TITAN;
+    this.mission.reset();
     this.rig.reset(this.spawnYaw);
     this.fx.reset();
-    this.stats = { time: 0, strikes: 0, napeHits: 0, best: 0 };
+    this.stats = { time: 0, strikes: 0, napeHits: 0, best: 0, hurt: false };
     this.hitStop = 0;
     this.slowMo = 0;
     this.slowMoMax = 1;
@@ -315,8 +359,59 @@ export class Game {
       this.audio.init();
       if (!this.touch && !this.input.locked) this.input.requestLock();
     } else {
-      this.showPanel('start');
+      this.showPanel(this.menuPanel);
     }
+  }
+
+  // ────────────────────────── 關卡選擇 ──────────────────────────
+  /** 換關：重新載入頁面（null＝回到關卡列表） */
+  _goLevel(id) {
+    if (id && id === this.level.id) {
+      this.restart(false);
+      this.showPanel('brief');
+      return;
+    }
+    location.search = id ? `?level=${id}` : '';
+  }
+
+  _stars(n, total = 3) {
+    return '★'.repeat(n) + '☆'.repeat(total - n);
+  }
+
+  _renderLevels() {
+    const list = document.getElementById('level-list');
+    list.innerHTML = '';
+    LEVELS.forEach((L, i) => {
+      const unlocked = isUnlocked(this.progress, L.id);
+      const p = this.progress[L.id];
+      const b = document.createElement('button');
+      b.className = `level-card${unlocked ? '' : ' locked'}`;
+      b.disabled = !unlocked;
+      b.innerHTML = `<span class="lv-no">${i + 1}</span><span class="lv-main"><b>${L.name}</b><small>${unlocked ? L.brief : '過了前一關才會解鎖'}</small></span><span class="lv-stars">${unlocked ? this._stars(p?.stars || 0) : '🔒'}</span>`;
+      b.addEventListener('click', () => this._goLevel(L.id));
+      list.appendChild(b);
+    });
+  }
+
+  _renderBrief() {
+    const L = this.level;
+    const p = this.progress[L.id];
+    document.getElementById('brief-title').textContent = `${LEVELS.indexOf(L) + 1}. ${L.name}`;
+    document.getElementById('brief-text').textContent = L.brief;
+    const goals = L.steps ? L.steps.map((s) => `<li>${s.text}</li>`).join('') : '';
+    document.getElementById('brief-steps').innerHTML = goals;
+    document.getElementById('brief-steps').hidden = !goals;
+    document.getElementById('brief-stars').innerHTML = L.stars.map((s, i) => `<li><span>${p && p.stars > i ? '★' : '☆'}</span>${starText(s)}</li>`).join('');
+    document.getElementById('brief-best').textContent = p?.time != null ? `最佳紀錄 ${p.time.toFixed(1)} 秒` : '';
+  }
+
+  _missionEvent(type) {
+    const msg = this.mission.event(type);
+    if (msg) {
+      this.hud.toast(msg, 'good', 1.6);
+      this.audio.play('ready');
+    }
+    this._updateMission();
   }
 
   resize() {
@@ -429,9 +524,7 @@ export class Game {
 
   // ────────────────────────── 戰鬥 ──────────────────────────
   _updateMission() {
-    const dead = this.titans.filter((t) => !t.alive).length;
-    const total = this.titans.length;
-    this.hud.setMission(dead >= total ? '全部討伐完成！' : `任務：討伐巨人 ${dead}/${total}　弱點＝後頸（發光處）`);
+    this.hud.setMission(this.mission.text(this.titans));
   }
 
   /** 目前勾住的巨人（沒有則 null） */
@@ -588,6 +681,7 @@ export class Game {
       } else if (!this._partHit(range * 0.7, true)) {
         this._bodyHit(range * 0.5);
       }
+      this._missionEvent('levi');
       legCut = titan.kneelTimer > kneel; // 砍到腳：交給「滑到背後」處理速度
     } else {
       this.rig.addShake(0.3);
@@ -662,6 +756,7 @@ export class Game {
         if (t.kneelTimer <= 0 && t.ankleWorld(side, _v).distanceTo(this.pc.pos) <= r * 1.2) {
           t.takePartHit('leg', T.legDamage);
           this._partFx(_v, '腳筋！跪下', t);
+          this._missionEvent('leg');
           this._legSlide(t);
           return true;
         }
@@ -743,6 +838,7 @@ export class Game {
     const perfect = dmg >= C.perfectDamage;
     titan.takeHit(dmg, true);
     this.stats.napeHits++;
+    this._missionEvent('nape');
     if (!spin) this.model.startSlash();
     const dir = _v2.copy(this.pc.vel).normalize();
     this.fx.burst(this.napePos, perfect ? 1.8 : 1.3, perfect ? '#ffb070' : '#ffd8b0', 0.24);
@@ -777,7 +873,7 @@ export class Game {
     this.rig.startKillCam(titan, this.napePos);
     const left = this.titans.filter((t) => t.alive).length;
     this.hud.toast(left === 0 ? '全部討伐完成！' : `討伐成功！還剩 ${left} 隻`, 'good big', 2.2);
-    this._updateMission();
+    this._missionEvent('kill');
   }
 
   // ── 被巨人抓住：連打斬擊掙脫 ──
@@ -1029,14 +1125,26 @@ export class Game {
       touchMode: this.hookMode === 'single' ? 'smart' : 'dual',
       smartSide: this.autoSide,
       reticle: this.reticle,
+      waypoint: this.mission.waypoint,
     });
     if (this.touch) this.touchUI.sync(pc, !!(this.aims.auto || this.aims.left || this.aims.right));
 
     // 勝負
     if (this.state === 'playing') {
-      if (this.titans.every((t) => t.state === 'dead')) {
+      // 光圈競速：通過判定
+      const ring = this.mission.update(pc.pos);
+      if (ring) {
+        this.audio.play('ready');
+        this.fx.burst(pc.pos, 1.2, '#ffe08a', 0.25);
+        this.rig.kick(6);
+        const left = this.mission.rings.length - ring;
+        this.hud.toast(left ? `光圈 ${ring}　${this.stats.time.toFixed(1)} 秒` : `全部通過！${this.stats.time.toFixed(1)} 秒`, 'good', 1.2);
+        this._updateMission();
+      }
+      this.mission.animate(this.stats.time);
+      if (this.mission.complete(this.titans)) {
         this.endTimer += dt;
-        if (this.endTimer > 1.2) this._end(true);
+        if (this.endTimer > (this.mission.type === 'kill' ? 1.2 : 0.6)) this._end(true);
       } else if (pc.hp <= 0) {
         this.endTimer += dt;
         if (this.endTimer > 1.4) this._end(false);
@@ -1095,6 +1203,7 @@ export class Game {
         this.audio.play('hookFire');
         break;
       case 'hookAttach':
+        this._missionEvent('hook');
         this.audio.play('hookAttach');
         this.fx.hookHit(e.point);
         this.hud.hookStatus('勾住', 'ok');
@@ -1112,6 +1221,7 @@ export class Game {
         if (e.slide) this.rig.addShake(Math.min(0.35, e.speed / 120));
         break;
       case 'fling':
+        this._missionEvent('fling');
         this.audio.play('fling');
         if (this.pc.ropeStyle === 'pull') {
           this.rig.addShake(0.12);
@@ -1138,6 +1248,7 @@ export class Game {
         this.burst = 1;
         break;
       case 'dashArrive':
+        this._missionEvent('dash');
         this.audio.play('fling');
         this.rig.addShake(0.15);
         this.fx.gasPuff(this.pc.pos, this.pc.vel, true);
@@ -1152,6 +1263,7 @@ export class Game {
         this.audio.play('jump');
         break;
       case 'hurt':
+        this.stats.hurt = true;
         this.audio.play('hurt');
         this.hud.hurt();
         this.rig.addShake(0.8);
@@ -1223,10 +1335,22 @@ export class Game {
     this.touchUI.show(false);
     if (document.pointerLockElement) document.exitPointerLock();
     const s = this.stats;
-    document.getElementById('result-title').textContent = won ? '討伐成功' : '任務失敗';
+    const L = this.level;
+    const got = evaluateStars(L, { won, time: s.time, hurt: s.hurt });
+    const n = got.filter(Boolean).length;
+    const before = this.progress[L.id]?.time;
+    if (won) this.progress = saveResult(storage, L.id, n, s.time);
+    const next = nextLevel(L.id);
+    const nextBtn = document.getElementById('btn-next');
+    nextBtn.hidden = !(won && next && isUnlocked(this.progress, next.id));
+    if (next) nextBtn.textContent = `下一關：${next.name}`;
+    document.getElementById('result-title').textContent = won ? (L.objective === 'kill' ? '討伐成功' : '任務完成') : '任務失敗';
     document.getElementById('result-title').className = won ? 'win' : 'lose';
+    const record = won && (before == null || s.time < before) ? '（新紀錄！）' : '';
     document.getElementById('result-body').innerHTML = `
-      <div><span>用時</span><b>${s.time.toFixed(1)} 秒</b></div>
+      <p class="result-stars">${this._stars(n)}</p>
+      ${L.stars.map((r, i) => `<div><span>${got[i] ? '★' : '☆'} ${starText(r)}</span><b>${got[i] ? '達成' : '—'}</b></div>`).join('')}
+      <div><span>用時</span><b>${s.time.toFixed(1)} 秒${record}</b></div>
       <div><span>最高速度</span><b>${this.pc.maxSpeed.toFixed(0)} m/s（${(this.pc.maxSpeed * 3.6).toFixed(0)} km/h）</b></div>
       <div><span>斬擊次數</span><b>${s.strikes}</b></div>
       <div><span>弱點命中</span><b>${s.napeHits}</b></div>`;

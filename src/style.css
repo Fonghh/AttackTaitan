@@ -860,3 +860,102 @@ body.touch #mission {
     font-size: 24px;
   }
 }
+
+/* ───────── 關卡 ───────── */
+#level-list {
+  margin-top: 14px;
+}
+.panel button.level-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  padding: 12px 14px;
+}
+.level-card .lv-no {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--accent);
+  width: 22px;
+  text-align: center;
+}
+.level-card .lv-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.level-card small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.level-card .lv-stars {
+  color: #ffd166;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+.panel button.level-card.locked {
+  opacity: 0.45;
+  cursor: default;
+}
+.star-rules {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 4px;
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.9;
+}
+.star-rules span {
+  color: #ffd166;
+  margin-right: 8px;
+}
+.result-stars {
+  font-size: 34px;
+  color: #ffd166;
+  letter-spacing: 6px;
+  margin: 0 0 8px;
+}
+body.no-titans #titan-bar,
+body.no-titans #nape-marker,
+body.no-titans #nape-arrow,
+body.no-titans #strike-checks {
+  display: none !important;
+}
+#wp-marker {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  border: 3px solid #ffd166;
+  border-radius: 50%;
+  box-shadow: 0 0 10px rgba(255, 209, 102, 0.8);
+  pointer-events: none;
+}
+#wp-marker span {
+  position: absolute;
+  top: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: #ffe7a8;
+  white-space: nowrap;
+}
+#wp-arrow {
+  position: absolute;
+  width: 0;
+  height: 0;
+  border-left: 18px solid rgba(255, 209, 102, 0.95);
+  border-top: 10px solid transparent;
+  border-bottom: 10px solid transparent;
+  pointer-events: none;
+}
+#wp-arrow::after {
+  content: attr(data-dist);
+  position: absolute;
+  left: -40px;
+  top: 8px;
+  font-size: 11px;
+  color: #ffe7a8;
+}
