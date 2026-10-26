@@ -362,6 +362,24 @@ try {
     return { free: +free.toFixed(2), hooked: +hooked.toFixed(2), attached: true };
   });
   check('[mobile] left stick turns the camera in the air (also while hooked)', joyTurn.free < -1.5 && joyTurn.hooked > 1.0, JSON.stringify(joyTurn));
+  // 陀螺儀：累積的轉動量會轉動鏡頭
+  const gyro = await page.evaluate(async () => {
+    const g = window.__game;
+    g.gyro.available = true; // 無頭瀏覽器：模擬已授權
+    if (window.DeviceMotionEvent) window.DeviceMotionEvent.requestPermission = async () => 'granted';
+    const ok = await g.gyro.enable();
+    g.gyroLevel = 'mid';
+    const y0 = g.rig.yaw, p0 = g.rig.pitch;
+    g.gyro.yaw = 0.3;
+    g.gyro.pitch = 0.1;
+    g.frame();
+    const out = { ok, dYaw: +(g.rig.yaw - y0).toFixed(3), dPitch: +(g.rig.pitch - p0).toFixed(3) };
+    g.renderer.setAnimationLoop(null);
+    g.gyro.disable();
+    g.gyroLevel = 'off';
+    return out;
+  });
+  check('[gyro] phone rotation turns the camera', gyro.ok && gyro.dYaw > 0.3 && gyro.dPitch > 0.1, JSON.stringify(gyro));
   // 兵長斬：勾在巨人後頸上 → 長按斬擊 → 短拍 → 沿鋼索迴旋直衝 → 命中後鋼索自動解除
   const levi = await page.evaluate(() => {
     const g = window.__game;

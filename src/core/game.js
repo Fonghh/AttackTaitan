@@ -9,6 +9,7 @@ import { CameraRig } from '../camera/cameraRig.js';
 import { Titan } from '../enemy/titan.js';
 import { evaluateStrike, canLunge, napeDamage } from '../combat/strike.js';
 import { Input, isTouchDevice } from '../input/input.js';
+import { Gyro } from '../input/gyro.js';
 import { TouchControls } from '../ui/touchControls.js';
 import { Hud } from '../ui/hud.js';
 import { Effects } from '../fx/effects.js';
@@ -75,6 +76,9 @@ export class Game {
     this.aimSens = Math.max(0.5, Math.min(2, Number(this._load('aimSens', String(cfg.reticle.defaultSens))) || cfg.reticle.defaultSens));
     this.touchUI.sens = this.aimSens;
     this.touchUI.flickEnabled = this._load('flick2', cfg.reticle.flick.enabled ? 'on' : 'off') === 'on';
+    this.gyro = new Gyro();
+    this.gyroLevel = this._load('gyro', cfg.camera.gyro.defaultLevel);
+    if (!(this.gyroLevel in cfg.camera.gyro.levels)) this.gyroLevel = cfg.camera.gyro.defaultLevel;
     this.joyTurnLevel = this._load('joyTurn', cfg.camera.joyTurn.defaultLevel);
     if (!(this.joyTurnLevel in cfg.camera.joyTurn.levels)) this.joyTurnLevel = cfg.camera.joyTurn.defaultLevel;
     this.speedLineLevel = this._load('speedLines', cfg.speedLines.defaultLevel);
@@ -153,6 +157,19 @@ export class Game {
       this._save('flick2', this.touchUI.flickEnabled ? 'on' : 'off');
       this._syncModeLabel();
     });
+    $('btn-gyro').addEventListener('click', async () => {
+      const order = ['off', 'low', 'mid', 'high'];
+      const next = order[(order.indexOf(this.gyroLevel) + 1) % order.length];
+      if (next !== 'off' && !this.gyro.enabled && !(await this.gyro.enable())) {
+        this.gyroLevel = 'off';
+        this.hud.toast(this.gyro.available ? '沒有取得陀螺儀權限' : '這個裝置不支援陀螺儀', 'warn', 1.6);
+      } else {
+        this.gyroLevel = next;
+        if (next === 'off') this.gyro.disable();
+      }
+      this._save('gyro', this.gyroLevel);
+      this._syncModeLabel();
+    });
     $('btn-joyturn').addEventListener('click', () => {
       const order = ['high', 'mid', 'low', 'off'];
       this.joyTurnLevel = order[(order.indexOf(this.joyTurnLevel) + 1) % order.length];
@@ -194,6 +211,7 @@ export class Game {
     document.getElementById('btn-hookfollow').textContent = this.hookFollow ? '鉤住時鏡頭跟隨人物：開' : '鉤住時鏡頭跟隨人物：關';
     document.getElementById('spd-val').textContent = `速度 ${Math.round(this.pc.speedScale * 100)}%`;
     document.getElementById('dash-val').textContent = `衝刺 ${Math.round(this.pc.dashScale * 100)}%（${Math.round(this.cfg.dash.speed * this.pc.dashScale)} m/s）`;
+    document.getElementById('btn-gyro').textContent = `陀螺儀瞄準：${{ high: '強', mid: '中', low: '弱', off: '關' }[this.gyroLevel]}`;
     document.getElementById('btn-joyturn').textContent = `空中左搖桿轉鏡頭：${{ high: '強', mid: '中', low: '弱', off: '關' }[this.joyTurnLevel]}`;
     document.getElementById('btn-lines').textContent = `速度線：${{ high: '高', mid: '中', low: '低', off: '關' }[this.speedLineLevel]}`;
     document.getElementById('sens-val').textContent = `準心靈敏度 ${Math.round(this.aimSens * 100)}%`;
@@ -228,6 +246,15 @@ export class Game {
 
   start() {
     this.audio.init();
+    // 陀螺儀：iOS 只能在點擊時要權限，所以在「開始遊戲」這一下順便開啟
+    if (this.gyroLevel !== 'off' && !this.gyro.enabled) {
+      this.gyro.enable().then((ok) => {
+        if (!ok) {
+          this.gyroLevel = 'off';
+          this._syncModeLabel();
+        }
+      });
+    }
     if (this.touch) {
       document.documentElement.requestFullscreen?.().catch(() => {});
     } else {
@@ -827,6 +854,16 @@ export class Game {
 
     if (this.state === 'playing' || this.state === 'won' || this.state === 'lost') {
       this.rig.look(intent.lookDX, intent.lookDY, intent.manualLook);
+      // 陀螺儀：轉動手機＝轉動鏡頭（暫停時丟掉累積量，回到遊戲不會突然轉一大圈）
+      if (this.gyro.enabled) {
+        const gy = this.gyro.take();
+        const k = this.cfg.camera.gyro.levels[this.gyroLevel] ?? 0;
+        if (this.state === 'playing' && k > 0 && (gy.yaw || gy.pitch)) {
+          this.rig.yaw += gy.yaw * k;
+          this.rig.pitch = Math.max(-1.35, Math.min(1.25, this.rig.pitch + gy.pitch * k));
+          if (Math.abs(gy.yaw) + Math.abs(gy.pitch) > 0.002) this.rig.lastManualLook = this.rig.time;
+        }
+      }
     }
 
     // 頓點：命中瞬間幾乎停住，接著慢動作逐漸恢復（卡肉感）

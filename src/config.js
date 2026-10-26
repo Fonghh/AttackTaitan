@@ -232,6 +232,11 @@ export const CONFIG = {
     followSmoothTime: 0.4, // 飛行方向的平滑時間（擺盪時不會急轉）
     followPitch: -0.14,
     // 手機：空中推左搖桿左右＝鏡頭跟著轉（和右邊準心搖桿的轉動相加，不衝突）
+    // 手機：陀螺儀瞄準（轉動手機＝轉動鏡頭），倍率 1 = 手機轉多少鏡頭就轉多少
+    gyro: {
+      levels: { off: 0, low: 0.7, mid: 1.2, high: 1.8 },
+      defaultLevel: 'off',
+    },
     joyTurn: {
       deadZone: 0.2, // 搖桿推超過 20% 才開始轉
       rate: 2.4, // 推到底每秒轉幾弧度（約 140°/秒）× 強度
