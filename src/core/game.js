@@ -268,6 +268,7 @@ export class Game {
     this.strikeCooldown = 0;
     this.chroma = 0;
     this.flickTurn = null;
+    this.passThrough = 0;
     this._updateMission();
     if (play) {
       this.state = 'playing';
@@ -440,6 +441,18 @@ export class Game {
       return;
     }
 
+    // 地面（或低空）靠近巨人腳邊 → 迴旋斬砍腳
+    const T = this.cfg.titan;
+    for (const t of this.titans) {
+      if (!t.alive || t.kneelTimer > 0) continue;
+      if (this.pc.pos.y > 5 * t.scale) continue;
+      const r = T.partRange * t.scale * this.cfg.strike.groundSpinRange;
+      if (t.ankleWorld('L', _v).distanceTo(this.pc.pos) < r || t.ankleWorld('R', _v).distanceTo(this.pc.pos) < r) {
+        this._spinAttack(t, true);
+        return;
+      }
+    }
+
     this.model.startSlash();
     this.fx.slash(_v.copy(this.pc.pos).addScaledVector(dir, 1.2), dir, this.model.slashSide, false);
     if (!this.titan.alive) return;
@@ -468,13 +481,19 @@ export class Game {
   }
 
   /** 迴旋斬：勾在巨人身上時出招，範圍大、不限方向（後頸仍需從側後方） */
-  _spinAttack(titan) {
+  _spinAttack(titan, ground = false) {
     const C = this.cfg.strike;
     this.model.startSpin();
     this.fx.spinRing(this.pc.pos);
     this.audio.play('swing');
     this.rig.addShake(0.3);
     this.titan = titan;
+    if (ground) {
+      // 地面迴旋斬：專砍腳（不需要速度）
+      const r = this.cfg.titan.partRange * titan.scale * C.groundSpinRange;
+      if (!this._partHit(r, true)) this._bodyHit(r);
+      return;
+    }
     const ev = this._evaluate();
     const range = C.spinRange * titan.scale;
     const minSp = C.minSpeed * C.spinSpeedFactor;
@@ -487,10 +506,10 @@ export class Game {
   }
 
   /** 部位斬擊：眼睛＝暈眩、腳（小腿下段）＝跪下 */
-  _partHit(rangeOverride) {
+  _partHit(rangeOverride, ignoreSpeed = false) {
     const T = this.cfg.titan;
     const C = this.cfg.strike;
-    if (this.pc.feelSpeed < C.minSpeed * 0.6) return false;
+    if (!ignoreSpeed && this.pc.feelSpeed < C.minSpeed * 0.6) return false;
     for (const t of this.titans) {
       if (!t.alive) continue;
       const r = rangeOverride ?? T.partRange * t.scale;
@@ -505,11 +524,40 @@ export class Game {
         if (t.kneelTimer <= 0 && t.ankleWorld(side, _v).distanceTo(this.pc.pos) <= r * 1.2) {
           t.takePartHit('leg', T.legDamage);
           this._partFx(_v, '腳筋！跪下', t);
+          this._legSlide(t);
           return true;
         }
       }
     }
     return false;
+  }
+
+  /** 砍完腳：帶著慣性從巨人腳邊滑到它背後（滑行時可穿過巨人身體） */
+  _legSlide(titan) {
+    const C = this.cfg.strike;
+    const pc = this.pc;
+    for (const side of ['left', 'right']) {
+      const h = pc.hooks[side];
+      if (h.active && h.object && h.object.userData.titan === titan) h.release();
+    }
+    const behind = _v2.copy(titan.root.position).addScaledVector(titan.forward, -C.legSlideBehind * titan.scale);
+    const dir = behind.sub(pc.pos).setY(0);
+    const dist = dir.length();
+    if (dist < 1e-3) return;
+    dir.multiplyScalar(1 / dist);
+    // 速度至少要能滑到背後（滑行減速 decel：v² = 2·a·d）
+    const need = Math.sqrt(2 * this.cfg.slide.decel * dist) + 2;
+    const hs = Math.hypot(pc.vel.x, pc.vel.z);
+    const sp = Math.max(hs, need, C.legSlideSpeed * Math.max(0.5, pc.speedScale));
+    pc.vel.x = dir.x * sp;
+    pc.vel.z = dir.z * sp;
+    if (pc.pos.y < 3) {
+      pc.vel.y = Math.min(pc.vel.y, 0);
+      pc.sliding = true;
+    }
+    this.passThrough = C.passThrough;
+    this.rig.kick(6);
+    this.fx.dust(pc.pos, pc.vel, 12);
   }
 
   _partFx(point, label, titan) {
@@ -702,6 +750,7 @@ export class Game {
       intent = { ...intent, move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false };
     }
     if (this.state === 'playing') this.stats.time += dt;
+    if (this.passThrough > 0) this.passThrough -= dt;
     this.strikeCooldown -= dt;
 
     // 巨人
@@ -718,7 +767,7 @@ export class Game {
     pc.update(dt, intent, {
       colliders: this.city.colliders,
       wallRadius: this.cfg.world.wallRadius,
-      titanSpheres: pc.lunge || this.grab ? null : this.titanSpheres,
+      titanSpheres: pc.lunge || this.grab || this.passThrough > 0 ? null : this.titanSpheres,
       camYaw: this.rig.yaw,
       camForward: this.rig.forward,
     });

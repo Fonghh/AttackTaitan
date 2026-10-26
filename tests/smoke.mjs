@@ -309,6 +309,34 @@ try {
     return out;
   });
   check('cutting the ankle makes the titan kneel', parts.kneel, JSON.stringify(parts));
+  const slide = await page.evaluate(() => {
+    const g = window.__game;
+    const V = g.pc.pos.constructor;
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    const t = g.titans[2];
+    for (const x of g.titans) x.attackCooldown = 99;
+    t.kneelTimer = 0;
+    t.stunTimer = 0;
+    g.step(1 / 60, base());
+    // 站在巨人正前方、腳邊的地面上，慢慢走（不需要速度）
+    const ank = t.ankleWorld('R', new V());
+    g.pc.pos.set(ank.x + t.forward.x * 3, 0.6, ank.z + t.forward.z * 3);
+    g.pc.vel.set(0, 0, 0);
+    g.step(1 / 60, base());
+    g.strikeCooldown = 0;
+    g._strike();
+    const spin = g.model.spinTimer > 0;
+    const kneel = t.kneelTimer > 0;
+    let maxBehind = -1e9;
+    for (let i = 0; i < 100; i++) {
+      g.step(1 / 60, base());
+      const rel = new V().subVectors(g.pc.pos, t.root.position);
+      maxBehind = Math.max(maxBehind, -(rel.x * t.forward.x + rel.z * t.forward.z));
+    }
+    return { spin, kneel, behind: +maxBehind.toFixed(1), scale: t.scale };
+  });
+  check('ground spin slash at the ankle makes the titan kneel', slide.spin && slide.kneel, JSON.stringify(slide));
+  check('after the leg cut the player slides through to behind the titan', slide.behind > 3 * slide.scale, JSON.stringify(slide));
   check('cutting the eye stuns the titan', parts.stun, JSON.stringify(parts));
   check('frontal strike does not hit the weak point', parts.frontNoNape);
 

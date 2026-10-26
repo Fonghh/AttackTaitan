@@ -186,6 +186,7 @@ export class PlayerController {
             hk.pullOn = true;
           }
         }
+        this._dashKick(_wish);
         this.emit('dash', {});
       }
     }
@@ -270,7 +271,7 @@ export class PlayerController {
 
     for (let i = 0; i < n; i++) {
       if (!this.lunge) {
-        const gScale = pulling ? (dashing ? 0 : cfg.hook.pull.gravityScale) : this.hangTimer > 0 ? cfg.fling.hangGravityScale : 1;
+        const gScale = pulling ? (dashing ? cfg.dash.gravityScale : cfg.hook.pull.gravityScale) : this.hangTimer > 0 ? cfg.fling.hangGravityScale : 1;
         this.vel.y -= cfg.gravity * gScale * h;
 
         if (this.grounded && !(attached && this.reeling > 0)) {
@@ -381,9 +382,27 @@ export class PlayerController {
       }
     }
 
-    softLimitSpeed(this.vel, Math.max(P.minSpeedCap, P.maxSpeed * this.speedScale), P.softLimitRate, dt);
+    let cap = Math.max(P.minSpeedCap, P.maxSpeed * this.speedScale);
+    if (this.dashing || this.anySlack) cap = Math.max(cap, cfg.dash.speed * this.dashScale * cfg.dash.maxSpeedFactor);
+    softLimitSpeed(this.vel, cap, P.softLimitRate, dt);
     this.maxSpeed = Math.max(this.maxSpeed, this.speed);
     if (hitWall) this.emit('bump', {});
+  }
+
+  /** 按下衝刺瞬間：沿搖桿方向（沒推搖桿就沿目前擺盪方向）補一下推力 */
+  _dashKick(wish) {
+    const D = this.cfg.dash;
+    for (const side of ['left', 'right']) {
+      const hk = this.hooks[side];
+      if (!hk.attached) continue;
+      hk.anchor(_anchor).sub(this.pos).normalize();
+      if (wish.lengthSq() > 0.04) _tmp.copy(wish);
+      else _tmp.copy(this.vel);
+      _tmp.addScaledVector(_anchor, -_tmp.dot(_anchor)); // 只取垂直於繩子的方向
+      if (_tmp.lengthSq() < 1e-3) return;
+      this.vel.addScaledVector(_tmp.normalize(), D.swingKick * Math.max(0.4, this.dashScale));
+      return;
+    }
   }
 
   /** 衝刺到勾點：鋼索放鬆（不斷），向上加成，帶著速度衝過頭往上飛 */
@@ -421,16 +440,25 @@ export class PlayerController {
         // 拉索：朝勾點加速到 maxSpeed，切線速度保留 → 帶著原本的慣性畫出弧線
         const along = this.vel.dot(_anchor);
         // 速度倍率很低時，拉力仍保有下限（否則拉不贏重力），但最高速度照比例降
-        let room = Math.max(H.pull.minSpeed, H.pull.maxSpeed * this.speedScale) - along;
-        let acc = Math.max(H.pull.minAccel, H.pull.accel * this.speedScale);
-        let damp = H.pull.sideDamp;
         if (this.dashing) {
-          // 衝刺：快速捲收，速度與拉力由衝刺倍率決定
+          // 衝刺（擺盪式）：快速收繩，但不壓掉側向速度；繩子變短時切線速度變快（角動量守恆）
           const D = this.cfg.dash;
-          room = D.speed * this.dashScale - along;
-          acc = D.accel * Math.max(0.4, this.dashScale);
-          damp = D.sideDamp;
+          const reel = D.reelSpeed * this.dashScale;
+          // 實際把繩子收短（鋼索約束每步最多修正 maxCorrection，不會瞬移）
+          hk.length = Math.max(H.minLength, Math.min(hk.length, dist) - reel * h);
+          if (along < reel) this.vel.addScaledVector(_anchor, Math.min(D.radialAccel * Math.max(0.4, this.dashScale) * h, reel - along));
+          if (hk.prevDist && dist < hk.prevDist) {
+            const k = Math.min(D.spinUpMax, hk.prevDist / dist) - 1;
+            _tmp.copy(this.vel).addScaledVector(_anchor, -this.vel.dot(_anchor));
+            this.vel.addScaledVector(_tmp, k);
+          }
+          hk.prevDist = dist;
+          continue;
         }
+        hk.prevDist = 0;
+        const room = Math.max(H.pull.minSpeed, H.pull.maxSpeed * this.speedScale) - along;
+        const acc = Math.max(H.pull.minAccel, H.pull.accel * this.speedScale);
+        const damp = H.pull.sideDamp;
         if (room > 0) this.vel.addScaledVector(_anchor, Math.min(acc * h, room));
         // 側向速度慢慢收斂，路線最後會對準勾點（但保留一段弧線）
         _tmp.copy(this.vel).addScaledVector(_anchor, -this.vel.dot(_anchor));

@@ -236,3 +236,23 @@ test('dash (fast reel): faster than the normal pull and flies up past the anchor
   assert.ok(dash.maxY > 50 + 10, `flew up past the anchor to ${dash.maxY.toFixed(1)}m (anchor 50m)`);
   assert.ok(dash.attached, 'rope is still attached (slack, not broken)');
 });
+
+test('dash keeps and amplifies sideways swing (not a straight pull)', () => {
+  const p = new PlayerController(CONFIG);
+  p.speedScale = CONFIG.player.defaultSpeedScale;
+  p.pos.set(0, 20, 40);
+  p.vel.set(12, 0, 0); // 帶著側向速度勾住
+  p.fireHook('right', p.pos.clone(), anchorAt(0, 50, 0));
+  let side = 0, maxTangential = 0;
+  for (let i = 0; i < 90; i++) {
+    p.update(1 / 60, { ...idle(), boost: true, boostPressed: i === 0 }, world());
+    side = Math.max(side, Math.abs(p.pos.x));
+    if (p.hooks.right.attached && !p.hooks.right.slack) {
+      const toA = new Vector3(0, 50, 0).sub(p.pos).normalize();
+      const t = p.vel.clone().addScaledVector(toA, -p.vel.dot(toA)).length();
+      maxTangential = Math.max(maxTangential, t);
+    }
+  }
+  assert.ok(side > 8, `swung ${side.toFixed(1)}m sideways`);
+  assert.ok(maxTangential > 20, `tangential swing speed grew to ${maxTangential.toFixed(1)} m/s`);
+});

@@ -80,7 +80,13 @@ export const CONFIG = {
     speed: 70, // 衝刺最高速度（m/s）× 衝刺倍率
     accel: 120, // 衝刺拉力（m/s²）
     defaultScale: 0.6, // 衝刺倍率預設值（暫停選單可調 10%～200%）
-    sideDamp: 3, // 衝刺時側向速度收斂（路線比較直）
+    // 擺盪式衝刺：快速收繩，保留並放大擺盪（繩子變短 → 轉得更快，像溜冰收手）
+    reelSpeed: 55, // 收繩速度（m/s）× 衝刺倍率
+    radialAccel: 140, // 朝勾點方向的加速度上限
+    gravityScale: 0.6, // 衝刺時保留的重力（產生甩動弧線）
+    spinUpMax: 1.05, // 每個子步驟切線速度最多放大幾倍（角動量守恆的上限）
+    swingKick: 9, // 按下衝刺瞬間，沿擺盪／搖桿方向補的推力（m/s）× 衝刺倍率
+    maxSpeedFactor: 1.2, // 衝刺時最高速度 = speed × 衝刺倍率 × 此值
     gasUse: 22, // 每秒消耗氣體
     slackExtra: 45, // 衝到勾點後鋼索放鬆，繩長 = 當下距離 + 這麼多
     launchBonus: 0.45, // 衝到勾點時向上速度加成
@@ -123,6 +129,10 @@ export const CONFIG = {
     perfectDamage: 100,
     bodyDamage: 4,
     bodyRange: 3.5,
+    legSlideSpeed: 26, // 砍腳後滑向巨人背後的最低速度（m/s）
+    legSlideBehind: 7, // 滑到巨人背後多遠（× 巨人體型）
+    passThrough: 0.8, // 滑行期間可穿過巨人身體的秒數
+    groundSpinRange: 1.6, // 地面迴旋斬：離腳踝 partRange × 此值以內
     spinRange: 7, // 迴旋斬範圍（× 巨人體型）
     spinSpeedFactor: 0.6, // 迴旋斬的速度門檻 = 一般斬擊 × 此值
     spinDamageBonus: 1.15,
