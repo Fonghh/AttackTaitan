@@ -1,0 +1,7 @@
+# Cloudflare Pages 快取設定：打包後的檔名帶雜湊，可以長期快取；首頁每次都重新檢查，更新後玩家馬上拿到新版
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache

@@ -1,0 +1,9 @@
+// Cloudflare Workers（靜態網站）：npm run build 之後，把 dist 資料夾當網站發佈
+{
+  "name": "attacktaitan",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
