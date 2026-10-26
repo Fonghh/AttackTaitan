@@ -74,7 +74,10 @@ export class Game {
     this.pc.dashScale = Math.max(0.1, Math.min(2, Number(this._load('dashScale', String(cfg.dash.defaultScale))) || cfg.dash.defaultScale));
     this.aimSens = Math.max(0.5, Math.min(2, Number(this._load('aimSens', String(cfg.reticle.defaultSens))) || cfg.reticle.defaultSens));
     this.touchUI.sens = this.aimSens;
-    this.touchUI.flickEnabled = this._load('flick', cfg.reticle.flick.enabled ? 'on' : 'off') === 'on';
+    this.touchUI.flickEnabled = this._load('flick2', cfg.reticle.flick.enabled ? 'on' : 'off') === 'on';
+    this.speedLineLevel = this._load('speedLines', cfg.speedLines.defaultLevel);
+    if (!(this.speedLineLevel in cfg.speedLines.levels)) this.speedLineLevel = cfg.speedLines.defaultLevel;
+    this.fx.speedLines.level = cfg.speedLines.levels[this.speedLineLevel];
     this.pc.steerScale = Math.max(0.5, Math.min(3, Number(this._load('steerScale2', String(cfg.hook.pull.defaultSteerScale))) || cfg.hook.pull.defaultSteerScale));
     this.pc.speedScale = Math.max(0.1, Math.min(1.5, Number(this._load('speedScale2', String(cfg.player.defaultSpeedScale))) || cfg.player.defaultSpeedScale));
     this.touchUI.setMode(this.hookMode);
@@ -145,7 +148,14 @@ export class Game {
     $('sens-up').addEventListener('click', () => setSens(0.1));
     $('btn-flick').addEventListener('click', () => {
       this.touchUI.flickEnabled = !this.touchUI.flickEnabled;
-      this._save('flick', this.touchUI.flickEnabled ? 'on' : 'off');
+      this._save('flick2', this.touchUI.flickEnabled ? 'on' : 'off');
+      this._syncModeLabel();
+    });
+    $('btn-lines').addEventListener('click', () => {
+      const order = ['high', 'mid', 'low', 'off'];
+      this.speedLineLevel = order[(order.indexOf(this.speedLineLevel) + 1) % order.length];
+      this.fx.speedLines.level = this.cfg.speedLines.levels[this.speedLineLevel];
+      this._save('speedLines', this.speedLineLevel);
       this._syncModeLabel();
     });
     $('steer-down').addEventListener('click', () => setSteer(-0.1));
@@ -176,6 +186,7 @@ export class Game {
     document.getElementById('btn-hookfollow').textContent = this.hookFollow ? '鉤住時鏡頭跟隨人物：開' : '鉤住時鏡頭跟隨人物：關';
     document.getElementById('spd-val').textContent = `速度 ${Math.round(this.pc.speedScale * 100)}%`;
     document.getElementById('dash-val').textContent = `衝刺 ${Math.round(this.pc.dashScale * 100)}%（${Math.round(this.cfg.dash.speed * this.pc.dashScale)} m/s）`;
+    document.getElementById('btn-lines').textContent = `速度線：${{ high: '高', mid: '中', low: '低', off: '關' }[this.speedLineLevel]}`;
     document.getElementById('sens-val').textContent = `準心靈敏度 ${Math.round(this.aimSens * 100)}%`;
     document.getElementById('btn-flick').textContent = this.touchUI.flickEnabled ? '快速甩動轉身：開' : '快速甩動轉身：關';
     document.getElementById('steer-val').textContent = `左右擺盪 ${Math.round(this.pc.steerScale * 100)}%（${Math.round(this.cfg.hook.pull.steerAccel * this.pc.steerScale)} m/s²）`;
@@ -644,7 +655,8 @@ export class Game {
     else if (pc.feelSpeed > 45) target = Math.min(0.35, (pc.feelSpeed - 45) / 40);
     this.burst = Math.max(target, (this.burst || 0) - dt * 2.5);
     const el = this.speedBurstEl || (this.speedBurstEl = document.getElementById('speedburst'));
-    el.style.opacity = this.burst.toFixed(3);
+    const lv = this.cfg.speedLines.levels[this.speedLineLevel] ?? 1;
+    el.style.opacity = (this.burst * Math.min(1, lv * 1.3)).toFixed(3);
     if (this.burst > 0.01) el.style.transform = `rotate(${(Math.random() * 6).toFixed(2)}deg) scale(${(1 + Math.random() * 0.04).toFixed(3)})`;
   }
 
@@ -878,6 +890,11 @@ export class Game {
       case 'hookAttach':
         this.audio.play('hookAttach');
         this.fx.hookHit(e.point);
+        this.hud.hookStatus('勾住', 'ok');
+        break;
+      case 'hookFail':
+        this.audio.play('miss');
+        this.hud.hookStatus('沒勾到', 'fail');
         break;
       case 'hookRelease':
         this.audio.play('hookRelease');

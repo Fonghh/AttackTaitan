@@ -206,6 +206,11 @@ export const CONFIG = {
   },
 
   speedLines: {
+    // 速度線濃度（暫停選單切換）：數量與亮度倍率
+    levels: { high: 1, mid: 0.55, low: 0.28, off: 0 },
+    defaultLevel: 'mid',
+    minRadius: 4, // 只在角色外圍生成（m），角色、鋼索與畫面中央保持乾淨
+    maxRadius: 11,
     minSpeed: 16,
     fullSpeed: 60,
     max: 110,
@@ -227,11 +232,11 @@ export const CONFIG = {
     turnRamp: 35, // 再推這麼遠，鏡頭轉速從 0 加到最快
     maxTurnRate: 3.5, // 鏡頭最快轉速（rad/s，約 200°/秒）
     edgePx: 14, // 手指離螢幕邊緣這麼近 → 視為推到底
-    defaultSens: 1.0, // 準心靈敏度預設（暫停選單 50%～200%）
+    defaultSens: 1.3, // 準心靈敏度預設（暫停選單 50%～200%；實測 120～150% 順手）
     snap: true, // 準心吸附：靠近建築轉角／屋頂邊緣時吸過去（手機）
     snapRadiusPx: 44,
     // 快速甩動轉身
-    flick: { enabled: true, minPx: 50, maxMs: 180, angleDeg: 90, duration: 0.16 },
+    flick: { enabled: false, minPx: 50, maxMs: 180, angleDeg: 90, duration: 0.16 },
   },
 
   world: {

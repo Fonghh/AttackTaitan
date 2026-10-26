@@ -75,6 +75,15 @@ export class Hud {
     });
   }
 
+  /** 準心旁短暫顯示鋼索狀態（勾住／沒勾到） */
+  hookStatus(text, cls) {
+    const el = document.getElementById('hook-status');
+    el.textContent = text;
+    el.className = '';
+    void el.offsetWidth; // 重新觸發動畫
+    el.className = `show ${cls}`;
+  }
+
   setMission(text) {
     this.el.mission.textContent = text;
   }

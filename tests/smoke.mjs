@@ -560,7 +560,8 @@ try {
   // 依新的兩段速度曲線，反推手指要拖多遠才會讓準心到 stick 的位置
   const RC = await mp.evaluate(() => window.__game.cfg.reticle);
   const m = Math.min(0.99, Math.hypot(stick.x, stick.y));
-  const dist = m <= RC.slowFrac ? RC.deadZone + (RC.slowEnd - RC.deadZone) * Math.pow(m / RC.slowFrac, 2 / 3) : RC.slowEnd + ((RC.fastEnd - RC.slowEnd) * (m - RC.slowFrac)) / (1 - RC.slowFrac);
+  const sens = await mp.evaluate(() => window.__game.touchUI.sens);
+  const dist = (m <= RC.slowFrac ? RC.deadZone + (RC.slowEnd - RC.deadZone) * Math.pow(m / RC.slowFrac, 2 / 3) : RC.slowEnd + ((RC.fastEnd - RC.slowEnd) * (m - RC.slowFrac)) / (1 - RC.slowFrac)) / sens;
   const ux = stick.x / Math.hypot(stick.x, stick.y), uy = stick.y / Math.hypot(stick.x, stick.y);
   const fx = ux * dist, fy = -uy * dist;
   for (let i = 1; i <= 6; i++) await mp.dispatchEvent('.t-hook', 'pointermove', { pointerId: 7, isPrimary: true, clientX: cx + (fx * i) / 6, clientY: cy + (fy * i) / 6 });
@@ -633,6 +634,7 @@ try {
   await mp.evaluate(() => {
     const g = window.__game;
     g.pc.releaseAll();
+    g.touchUI.flickEnabled = true; // 預設關閉，這裡打開來測
     g.cfg.reticle.flick.maxMs = 10000;
     window.__evlog = [];
     g.input.__origPush = g.input.__origPush || g.input.push.bind(g.input);
@@ -649,9 +651,42 @@ try {
   await mp.evaluate(() => {
     const g = window.__game;
     g.cfg.reticle.flick.maxMs = 180;
+    g.touchUI.flickEnabled = false;
     g.input.push = g.input.__origPush;
   });
   check('mobile: quick swipe on the rope button turns ~90° left without firing', Math.abs(flick.dyaw - Math.PI / 2) < 0.25 && flick.events.join() === 'flick:-1', JSON.stringify(flick));
+
+  // 鋼索辨識：勾住後有光暈、勾點標記、準心旁「勾住」提示
+  await mp.evaluate(() => window.__game.restart(true));
+  await mp.evaluate(() => {
+    const g = window.__game;
+    g.rig.pitch = 0.35;
+    g.rig.yaw -= 0.12;
+  });
+  await mp.waitForFunction(() => !!window.__game.aims.auto, null, { timeout: 30000 }).catch(() => {});
+  await mp.evaluate(() => window.__game._hookToggle('auto'));
+  await mp.waitForFunction(() => window.__game.pc.anyAttached, null, { timeout: 30000 }).catch(() => {});
+  await mp.waitForTimeout(300);
+  const rope = await mp.evaluate(() => {
+    const g = window.__game;
+    const side = g.pc.hooks.left.attached ? 'left' : 'right';
+    const r = g.fx.ropes[side];
+    return { glow: r.glow.visible, marker: r.marker.visible, status: document.getElementById('hook-status').textContent };
+  });
+  check('mobile: attached rope shows glow + anchor marker + "勾住" status', rope.glow && rope.marker && rope.status === '勾住', JSON.stringify(rope));
+  await mp.screenshot({ path: `${OUT}/06-mobile-rope.png` });
+  // 速度線設定：預設「中」，可切換到「關」
+  const lines = await mp.evaluate(() => {
+    const g = window.__game;
+    const start = g.speedLineLevel;
+    const seen = [];
+    for (let i = 0; i < 4; i++) {
+      document.getElementById('btn-lines').click();
+      seen.push(g.speedLineLevel + ':' + g.fx.speedLines.level);
+    }
+    return { start, seen, flickDefault: g.touchUI.flickEnabled };
+  });
+  check('speed lines setting defaults to 中 and cycles 高/中/低/關; flick turn off by default', lines.start === 'mid' && lines.seen.includes('off:0') && lines.flickDefault === false, JSON.stringify(lines));
 
   // 速度倍率
   await mp.evaluate(() => window.__game.pause());

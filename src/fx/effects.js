@@ -112,19 +112,20 @@ class SpeedLines {
     for (let i = 0; i < N; i++) this.lines.push({ on: false, head: new THREE.Vector3(), dir: new THREE.Vector3(), len: 0, life: 0, max: 1, bright: 1 });
     this.acc = 0;
     this.intensity = 0;
+    this.level = cfg.levels[cfg.defaultLevel];
   }
 
   /** @param {number} feel 體感速度倍數（速度倍率越低，同樣速度看起來越快） */
   update(dt, pos, vel, feel = 1) {
     const C = this.cfg;
     const speed = vel.length() * feel;
-    const f = Math.max(0, Math.min(1, (speed - C.minSpeed) / (C.fullSpeed - C.minSpeed)));
+    const f = Math.max(0, Math.min(1, (speed - C.minSpeed) / (C.fullSpeed - C.minSpeed))) * (this.level > 0 ? 1 : 0);
     this.intensity = f;
     const vdir = _v.copy(vel).normalize();
     // 生成
     if (f > 0) {
-      this.acc += C.spawnPerSec * f * f * dt + 6 * f * dt;
-      const maxActive = Math.floor(C.max * (0.25 + 0.75 * f));
+      this.acc += (C.spawnPerSec * f * f * dt + 6 * f * dt) * this.level;
+      const maxActive = Math.floor(C.max * (0.25 + 0.75 * f) * this.level);
       let active = 0;
       for (const l of this.lines) if (l.on) active++;
       while (this.acc >= 1) {
@@ -135,12 +136,12 @@ class SpeedLines {
         // 垂直於速度方向的隨機偏移（離角色 1.2–7m 的圓柱殼）
         _v2.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).cross(vdir);
         if (_v2.lengthSq() < 1e-4) _v2.set(1, 0, 0);
-        _v2.normalize().multiplyScalar(1.2 + Math.random() * 5.8);
+        _v2.normalize().multiplyScalar(C.minRadius + Math.random() * (C.maxRadius - C.minRadius));
         l.head.copy(pos).addScaledVector(vdir, 6 + Math.random() * 26).add(_v2);
         l.dir.copy(vdir);
         l.len = Math.max(1.2, speed * C.lengthPerSpeed * (0.5 + Math.random() * 0.8) * (0.5 + f));
         l.max = l.life = 0.35 + Math.random() * 0.5;
-        l.bright = (0.35 + Math.random() * 0.45) * (0.4 + 0.6 * f);
+        l.bright = (0.35 + Math.random() * 0.45) * (0.4 + 0.6 * f) * (0.5 + 0.5 * this.level);
         l.on = true;
         active++;
       }
@@ -185,34 +186,61 @@ class SpeedLines {
 /** 鋼索：細圓柱連接發射器與鉤爪 */
 class RopeVisual {
   constructor(scene, color) {
+    // 核心（加粗）＋外層光暈，方便在高速中辨識
     this.mesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.03, 0.03, 1, 5, 1, true).translate(0, 0.5, 0),
+      new THREE.CylinderGeometry(0.065, 0.065, 1, 6, 1, true).translate(0, 0.5, 0),
       new THREE.MeshBasicMaterial({ color }),
     );
-    this.mesh.frustumCulled = false;
-    this.claw = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.45, 6), new THREE.MeshStandardMaterial({ color: '#cfd6dc', metalness: 0.8, roughness: 0.3 }));
-    scene.add(this.mesh, this.claw);
-    this.mesh.visible = this.claw.visible = false;
+    this.glow = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.2, 0.2, 1, 8, 1, true).translate(0, 0.5, 0),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false }),
+    );
+    this.mesh.frustumCulled = this.glow.frustumCulled = false;
+    this.claw = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.6, 6), new THREE.MeshStandardMaterial({ color: '#cfd6dc', metalness: 0.8, roughness: 0.3 }));
+    // 勾點標記：發光圓環，被建築擋住也看得到
+    this.marker = new THREE.Mesh(
+      new THREE.RingGeometry(0.55, 0.85, 24),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthTest: false, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    this.marker.renderOrder = 20;
+    scene.add(this.mesh, this.glow, this.claw, this.marker);
+    this.hide();
     this.baseColor = new THREE.Color(color);
+    this.t = 0;
   }
 
-  set(from, to, taut) {
+  set(from, to, taut, attached, camera, dt) {
     _v.subVectors(to, from);
     const len = _v.length();
     if (len < 1e-3) return;
+    this.t += dt || 0;
     this.mesh.visible = this.claw.visible = true;
+    this.glow.visible = attached;
     this.mesh.position.copy(from);
+    this.glow.position.copy(from);
     _v.multiplyScalar(1 / len);
     _q.setFromUnitVectors(_Y, _v);
     this.mesh.quaternion.copy(_q);
-    this.mesh.scale.set(taut ? 1.0 : 0.8, len, taut ? 1.0 : 0.8);
-    this.mesh.material.color.copy(this.baseColor).multiplyScalar(taut ? 1.25 : 0.85);
+    this.glow.quaternion.copy(_q);
+    // 飛行中細、勾住後粗；繃緊時最亮
+    const w = attached ? (taut ? 1.0 : 0.85) : 0.6;
+    this.mesh.scale.set(w, len, w);
+    this.glow.scale.set(w, len, w);
+    this.mesh.material.color.copy(this.baseColor).multiplyScalar(attached ? (taut ? 1.35 : 1.0) : 0.8);
     this.claw.position.copy(to);
     this.claw.quaternion.copy(_q);
+    // 勾點標記：面向鏡頭，依距離放大，輕微脈動
+    this.marker.visible = attached && !!camera;
+    if (this.marker.visible) {
+      this.marker.position.copy(to);
+      this.marker.lookAt(camera.position);
+      const d = camera.position.distanceTo(to);
+      this.marker.scale.setScalar(Math.max(1, d * 0.045) * (1 + Math.sin(this.t * 8) * 0.12));
+    }
   }
 
   hide() {
-    this.mesh.visible = this.claw.visible = false;
+    this.mesh.visible = this.claw.visible = this.glow.visible = this.marker.visible = false;
   }
 }
 
@@ -532,7 +560,7 @@ export class Effects {
       model.launcherWorld(side, _from);
       if (h.attached) h.anchor(_to);
       else _to.copy(h.head);
-      r.set(_from, _to, h.attached && h.taut);
+      r.set(_from, _to, h.attached && h.taut, h.attached, camera, dt);
     }
   }
 

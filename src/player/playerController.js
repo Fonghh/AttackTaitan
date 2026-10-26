@@ -156,8 +156,11 @@ export class PlayerController {
     origin.y += 0.3;
     for (const side of ['left', 'right']) {
       const h = this.hooks[side];
+      const wasFlying = h.state === 'flying';
       if (h.updateFlight(dt, origin, cfg.hook.travelSpeed, cfg.hook.initialSlack, cfg.hook.range)) {
         this.emit('hookAttach', { side, point: h.target.clone() });
+      } else if (wasFlying && h.state === 'idle') {
+        this.emit('hookFail', { side }); // 目標在飛行途中跑掉（例如巨人移動）
       }
       if (h.attached) h.attachTime += dt;
     }
