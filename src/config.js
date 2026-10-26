@@ -96,10 +96,14 @@ export const CONFIG = {
     rampStart: 0.25, // 剛按下時的力道比例
     rampDecay: 1.5, // 放開後累積的力道以幾倍速度消退（短暫放開再按可以接著加速）
     carryDecay: 7, // 放開衝刺後，最高速度上限每秒下降多少（m/s）
-    // 地面衝刺：沒勾住、在地上按衝刺＝壓低身體滑鏟（可穿過巨人腳下、經過腳踝自動砍）
-    groundSpeed: 34, // m/s × max(0.7, 速度倍率)
-    groundTime: 0.55, // 滑鏟期間（秒）：可穿過巨人、靠近腳踝自動砍
-    groundGas: 12,
+    // 地面衝刺：沒勾住、在地上按住衝刺＝壓低身體滑鏟，一樣是氮氣式越按越快
+    // （可穿過巨人腳下、經過腳踝自動砍）；速度都 × max(0.7, 速度倍率)
+    groundStart: 14, // 按下瞬間的滑鏟速度（m/s）
+    groundAccel: 30, // 全力時的加速度（m/s²），力道跟著按住時間漸增
+    groundMax: 42, // 地面衝刺最高速度（m/s）
+    groundTime: 0.35, // 放開後還能穿過巨人／自動砍腳的秒數
+    groundGas: 4, // 按下瞬間耗氣
+    groundGasUse: 16, // 按住時每秒耗氣
   },
 
   boost: {
@@ -227,7 +231,14 @@ export const CONFIG = {
     autoFollowDelayTouch: 0.7,
     followSmoothTime: 0.4, // 飛行方向的平滑時間（擺盪時不會急轉）
     followPitch: -0.14,
-    joystickTurnRate: 1.0,
+    // 手機：空中推左搖桿左右＝鏡頭跟著轉（和右邊準心搖桿的轉動相加，不衝突）
+    joyTurn: {
+      deadZone: 0.2, // 搖桿推超過 20% 才開始轉
+      rate: 2.4, // 推到底每秒轉幾弧度（約 140°/秒）× 強度
+      curve: 1.6, // 輕推轉得慢、推到底轉得快
+      levels: { high: 1.5, mid: 1, low: 0.55, off: 0 },
+      defaultLevel: 'mid',
+    },
     // 手機：鉤住時鏡頭轉向人物面朝的方向（放索後再跟一小段）
     hookFollow: true,
     hookFollowRate: 3.0,

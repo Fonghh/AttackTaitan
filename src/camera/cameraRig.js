@@ -91,8 +91,13 @@ export class CameraRig {
       this.followDir.x += (pc.vel.x / hs - this.followDir.x) * k;
       this.followDir.z += (pc.vel.z / hs - this.followDir.z) * k;
     }
-    if (opts.touch && Math.abs(opts.joyX) > 0.5 && !pc.grounded) {
-      this.yaw -= Math.sign(opts.joyX) * (Math.abs(opts.joyX) - 0.5) * 2 * C.joystickTurnRate * dt;
+    // 空中推左搖桿左右：鏡頭跟著轉（用真實時間，慢動作時也轉得動）；轉動時暫停「鉤住時鏡頭跟隨」
+    const J = C.joyTurn;
+    const ax = Math.abs(opts.joyX || 0);
+    if (opts.touch && opts.joyTurn > 0 && ax > J.deadZone && !pc.grounded) {
+      const k = Math.pow((ax - J.deadZone) / (1 - J.deadZone), J.curve);
+      this.yaw -= Math.sign(opts.joyX) * k * J.rate * opts.joyTurn * (opts.realDt ?? dt);
+      this.lastManualLook = this.time;
     }
     // 鉤住時跟隨人物面朝方向（手動拖曳轉視角後 0.5 秒內不干擾）
     if (opts.followYaw != null && this.time - this.lastManualLook > 0.5) {

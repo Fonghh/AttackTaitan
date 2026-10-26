@@ -53,6 +53,7 @@ export class PlayerController {
     this.dashGlow = 0; // 衝刺的速度感（放開後慢慢退，給鏡頭與特效用）
     this.capBoost = 0; // 放開衝刺後保留的最高速度上限（慢慢降）
     this.groundDashTimer = 0;
+    this.groundDashing = false;
     this.wallCarry = new Vector3(); // 撞牆損失的水平速度
     this.wallCarryTimer = 0;
     this.carry = new Vector3(); // 放索後等待歸還的水平速度
@@ -188,11 +189,15 @@ export class PlayerController {
     const dashing = attached && intent.boost && this.gas > 0 && !this.busy;
     this.dashing = dashing;
     const D = cfg.dash;
-    if (dashing) this.dashHeld = Math.min(D.rampTime, this.dashHeld + dt);
+    // 地面衝刺（沒勾住、在地上按住）
+    const groundDashing = !attached && intent.boost && this.gas > 0 && !this.busy && (this.grounded || (this.groundDashing && this.pos.y < 2));
+    if (groundDashing && !this.groundDashing) this._groundDashStart(_wish, world);
+    this.groundDashing = groundDashing;
+    if (dashing || groundDashing) this.dashHeld = Math.min(D.rampTime, this.dashHeld + dt);
     else this.dashHeld = Math.max(0, this.dashHeld - dt * D.rampDecay);
     const rx = this.dashHeld / D.rampTime;
     this.dashRamp = D.rampStart + (1 - D.rampStart) * rx * rx * (3 - 2 * rx);
-    this.dashGlow = dashing ? Math.max(this.dashGlow, this.dashRamp) : Math.max(0, this.dashGlow - dt * 0.6);
+    this.dashGlow = dashing || groundDashing ? Math.max(this.dashGlow, this.dashRamp) : Math.max(0, this.dashGlow - dt * 0.6);
     if (dashing) {
       this.gas = Math.max(0, this.gas - cfg.dash.gasUse * dt);
       if (intent.boostPressed) {
@@ -228,9 +233,9 @@ export class PlayerController {
     this.pulling = pulling;
     this.reeling = pulling ? 1 : attached ? Math.max(intent.reel, dashing ? 1 : 0) : 0;
 
-    // 地面衝刺：壓低身體滑鏟（可從巨人腳下穿過）
+    // 地面衝刺：壓低身體滑鏟（可從巨人腳下穿過），按住越久越快
     if (this.groundDashTimer > 0) this.groundDashTimer -= dt;
-    if (intent.boostPressed && this.grounded && !attached && !this.busy && this.gas >= D.groundGas * 0.5) this._groundDash(_wish, world);
+    if (groundDashing) this._groundDashHold(dt, _wish);
     // 加速（消耗氣體）：空中沿視角方向噴氣
     this.boosting = false;
     if (intent.boost && this.gas > 0 && !this.busy && !attached && !this.grounded && this.groundDashTimer <= 0) {
@@ -419,21 +424,36 @@ export class PlayerController {
     if (hitWall) this.emit('bump', {});
   }
 
-  /** 地面衝刺：壓低身體沿搖桿（沒推就沿視角）方向滑鏟 */
-  _groundDash(wish, world) {
+  /** 地面衝刺開始：壓低身體沿搖桿（沒推就沿視角）方向起步滑鏟 */
+  _groundDashStart(wish, world) {
     const D = this.cfg.dash;
     if (wish.lengthSq() > 0.04) _tmp.copy(wish).setY(0);
     else _tmp.copy(world.camForward).setY(0);
     if (_tmp.lengthSq() < 1e-4) return;
     _tmp.normalize();
-    const sp = Math.max(Math.hypot(this.vel.x, this.vel.z), D.groundSpeed * Math.max(0.7, this.speedScale));
+    const hs = Math.hypot(this.vel.x, this.vel.z);
+    const sp = Math.max(hs, D.groundStart * Math.max(0.7, this.speedScale));
     this.vel.x = _tmp.x * sp;
     this.vel.z = _tmp.z * sp;
     this.vel.y = Math.min(this.vel.y, 0);
     this.sliding = true;
-    this.groundDashTimer = D.groundTime;
     this.gas = Math.max(0, this.gas - D.groundGas);
     this.emit('groundDash', {});
+  }
+
+  /** 按住地面衝刺：氮氣式加速（力道隨按住時間漸增），方向跟著搖桿慢慢轉 */
+  _groundDashHold(dt, wish) {
+    const D = this.cfg.dash;
+    const k = Math.max(0.7, this.speedScale);
+    this.gas = Math.max(0, this.gas - D.groundGasUse * dt);
+    this.groundDashTimer = D.groundTime;
+    this.sliding = true;
+    const hs = Math.hypot(this.vel.x, this.vel.z);
+    if (wish.lengthSq() > 0.04) _tmp.copy(wish).setY(0).normalize();
+    else if (hs > 1) _tmp.set(this.vel.x / hs, 0, this.vel.z / hs);
+    else return;
+    const room = D.groundMax * k - hs;
+    if (room > 0) this.vel.addScaledVector(_tmp, Math.min(room, D.groundAccel * k * this.dashRamp * dt));
   }
 
   /** 兵長斬：開始空中短拍（之後自動沿鋼索直衝） */
@@ -579,9 +599,9 @@ export class PlayerController {
     const cfg = this.cfg;
     const P = cfg.player;
     if (this.sliding) {
-      // 慣性滑行：水平速度逐漸衰減，可微調方向
+      // 慣性滑行：水平速度逐漸衰減，可微調方向（地面衝刺按住時不減速）
       const hs = Math.hypot(this.vel.x, this.vel.z);
-      const ns = Math.max(0, hs - cfg.slide.decel * h);
+      const ns = this.groundDashing ? hs : Math.max(0, hs - cfg.slide.decel * h);
       if (hs > 1e-4) {
         this.vel.x *= ns / hs;
         this.vel.z *= ns / hs;

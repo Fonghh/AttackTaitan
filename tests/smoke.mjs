@@ -337,6 +337,31 @@ try {
   });
   check('ground spin slash at the ankle makes the titan kneel', slide.spin && slide.kneel, JSON.stringify(slide));
   check('after the leg cut the player slides through to behind the titan', slide.behind > 3 * slide.scale, JSON.stringify(slide));
+  // 手機：空中推左搖桿左右 → 鏡頭跟著轉（鉤住時也一樣，不被「鏡頭跟隨人物」拉回去）
+  const joyTurn = await page.evaluate(() => {
+    const g = window.__game;
+    g.restart(true);
+    g.renderer.setAnimationLoop(null);
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    const wasTouch = g.touch;
+    g.touch = true;
+    g.realDt = 1 / 60;
+    g.pc.pos.y += 30; // 空中（地面上不轉）
+    g.pc.vel.set(0, 0, 0);
+    for (let i = 0; i < 5; i++) g.step(1 / 60, base());
+    const y0 = g.rig.yaw;
+    for (let i = 0; i < 60; i++) g.step(1 / 60, { ...base(), move: { x: 1, y: 0 } });
+    const free = g.rig.yaw - y0;
+    g._hookToggle('auto');
+    for (let i = 0; i < 15; i++) g.step(1 / 60, base());
+    const y1 = g.rig.yaw;
+    for (let i = 0; i < 60; i++) g.step(1 / 60, { ...base(), move: { x: -1, y: 0 } });
+    const hooked = g.rig.yaw - y1;
+    g.touch = wasTouch;
+    g.pc.releaseAll();
+    return { free: +free.toFixed(2), hooked: +hooked.toFixed(2), attached: true };
+  });
+  check('[mobile] left stick turns the camera in the air (also while hooked)', joyTurn.free < -1.5 && joyTurn.hooked > 1.0, JSON.stringify(joyTurn));
   // 兵長斬：勾在巨人後頸上 → 長按斬擊 → 短拍 → 沿鋼索迴旋直衝 → 命中後鋼索自動解除
   const levi = await page.evaluate(() => {
     const g = window.__game;
@@ -405,12 +430,13 @@ try {
     g.strikeCooldown = 0;
     let maxY = 0;
     for (let i = 0; i < 60; i++) {
-      g.step(1 / 60, { ...base(), move: { x: 0, y: 1 }, boost: i < 5, boostPressed: i === 0 });
+      g.step(1 / 60, { ...base(), move: { x: 0, y: 1 }, boost: true, boostPressed: i === 0 });
       maxY = Math.max(maxY, g.pc.pos.y);
     }
-    return { kneel: t.kneelTimer > 0, maxY: +maxY.toFixed(2) };
+    for (let i = 0; i < 40; i++) g.step(1 / 60, base()); // 放開衝刺，滑鏟結束
+    return { kneel: t.kneelTimer > 0, maxY: +maxY.toFixed(2), ended: g.pc.groundDashTimer <= 0 };
   });
-  check('[ground dash] slide under the titan cuts the ankle automatically', gdash.kneel && gdash.maxY < 2, JSON.stringify(gdash));
+  check('[ground dash] slide under the titan cuts the ankle automatically', gdash.kneel && gdash.maxY < 2 && gdash.ended, JSON.stringify(gdash));
   check('cutting the eye stuns the titan', parts.stun, JSON.stringify(parts));
   check('frontal strike does not hit the weak point', parts.frontNoNape);
 
@@ -420,6 +446,7 @@ try {
     const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
     const t = g.titans[1];
     t.stunTimer = 0;
+    t.kneelTimer = 0; // 前面的測試可能砍過它的腳
     t.setState('grabReach');
     for (let i = 0; i < 3; i++) {
       t.grabHandWorld(g.pc.pos);
@@ -429,7 +456,7 @@ try {
     const grabbed = !!g.grab;
     for (let i = 0; i < g.cfg.titan.grabEscapeTaps; i++) g._handleEvent('strike');
     for (let i = 0; i < 5; i++) g.step(1 / 60, base());
-    return { grabbed, escaped: !g.grab && !t.holding };
+    return { grabbed, escaped: !g.grab && !t.holding, alive: t.alive, state: t.state, hp: t.hp };
   });
   check('titan can grab the player; mashing strike escapes', grab.grabbed && grab.escaped, JSON.stringify(grab));
 

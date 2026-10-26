@@ -297,12 +297,19 @@ test('ground dash: low slide along the stick direction, no jump', () => {
   for (let i = 0; i < 10; i++) p.update(1 / 60, idle(), world());
   const z0 = p.pos.z;
   let maxY = 0;
-  for (let i = 0; i < 40; i++) {
+  const sp = [];
+  for (let i = 0; i < 90; i++) {
     p.update(1 / 60, { ...idle(), move: { x: 0, y: 1 }, boost: true, boostPressed: i === 0 }, world());
     maxY = Math.max(maxY, p.pos.y);
+    sp.push(p.speed);
   }
-  assert.ok(z0 - p.pos.z > 8, `slid ${(z0 - p.pos.z).toFixed(1)}m forward`);
+  assert.ok(z0 - p.pos.z > 15, `slid ${(z0 - p.pos.z).toFixed(1)}m forward`);
   assert.ok(maxY < 1.5, `stayed low (max y ${maxY.toFixed(2)})`);
+  assert.ok(sp[10] < 16 && sp[89] > sp[10] + 8, `nitro build-up on the ground: ${sp[10].toFixed(1)} → ${sp[89].toFixed(1)} m/s`);
+  // 放開：照一般滑行慢慢減速，不會瞬間停
+  const atRelease = p.speed;
+  for (let i = 0; i < 15; i++) p.update(1 / 60, idle(), world());
+  assert.ok(p.speed > atRelease * 0.6, `0.25 s after release still ${p.speed.toFixed(1)} m/s`);
 });
 
 test('Levi slash: brief hover, then spins straight along the rope to the anchor', () => {

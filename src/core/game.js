@@ -75,6 +75,8 @@ export class Game {
     this.aimSens = Math.max(0.5, Math.min(2, Number(this._load('aimSens', String(cfg.reticle.defaultSens))) || cfg.reticle.defaultSens));
     this.touchUI.sens = this.aimSens;
     this.touchUI.flickEnabled = this._load('flick2', cfg.reticle.flick.enabled ? 'on' : 'off') === 'on';
+    this.joyTurnLevel = this._load('joyTurn', cfg.camera.joyTurn.defaultLevel);
+    if (!(this.joyTurnLevel in cfg.camera.joyTurn.levels)) this.joyTurnLevel = cfg.camera.joyTurn.defaultLevel;
     this.speedLineLevel = this._load('speedLines', cfg.speedLines.defaultLevel);
     if (!(this.speedLineLevel in cfg.speedLines.levels)) this.speedLineLevel = cfg.speedLines.defaultLevel;
     this.fx.speedLines.level = cfg.speedLines.levels[this.speedLineLevel];
@@ -151,6 +153,12 @@ export class Game {
       this._save('flick2', this.touchUI.flickEnabled ? 'on' : 'off');
       this._syncModeLabel();
     });
+    $('btn-joyturn').addEventListener('click', () => {
+      const order = ['high', 'mid', 'low', 'off'];
+      this.joyTurnLevel = order[(order.indexOf(this.joyTurnLevel) + 1) % order.length];
+      this._save('joyTurn', this.joyTurnLevel);
+      this._syncModeLabel();
+    });
     $('btn-lines').addEventListener('click', () => {
       const order = ['high', 'mid', 'low', 'off'];
       this.speedLineLevel = order[(order.indexOf(this.speedLineLevel) + 1) % order.length];
@@ -186,6 +194,7 @@ export class Game {
     document.getElementById('btn-hookfollow').textContent = this.hookFollow ? '鉤住時鏡頭跟隨人物：開' : '鉤住時鏡頭跟隨人物：關';
     document.getElementById('spd-val').textContent = `速度 ${Math.round(this.pc.speedScale * 100)}%`;
     document.getElementById('dash-val').textContent = `衝刺 ${Math.round(this.pc.dashScale * 100)}%（${Math.round(this.cfg.dash.speed * this.pc.dashScale)} m/s）`;
+    document.getElementById('btn-joyturn').textContent = `空中左搖桿轉鏡頭：${{ high: '強', mid: '中', low: '弱', off: '關' }[this.joyTurnLevel]}`;
     document.getElementById('btn-lines').textContent = `速度線：${{ high: '高', mid: '中', low: '低', off: '關' }[this.speedLineLevel]}`;
     document.getElementById('sens-val').textContent = `準心靈敏度 ${Math.round(this.aimSens * 100)}%`;
     document.getElementById('btn-flick').textContent = this.touchUI.flickEnabled ? '快速甩動轉身：開' : '快速甩動轉身：關';
@@ -932,6 +941,7 @@ export class Game {
     this.rig.update(dt, pc, {
       touch: this.touch,
       joyX: intent.move.x,
+      joyTurn: this.cfg.camera.joyTurn.levels[this.joyTurnLevel] ?? 1,
       autoFollow: this.cameraFollow,
       followYaw: hookFollow ? this.model.yaw : null,
       lowAngle: this.lowAngle,
@@ -951,7 +961,7 @@ export class Game {
 
     // 特效
     this.fx.update(dt, pc, this.model, this.camera);
-    if (pc.boosting || pc.dashing) this.fx.gasPuff(pc.pos, pc.vel, true);
+    if (pc.boosting || pc.dashing || pc.groundDashing) this.fx.gasPuff(pc.pos, pc.vel, true);
     if (pc.lunge) this.fx.trail(pc.pos);
     if (pc.levi) this.fx.leviTrail(pc.pos, pc.levi.phase === 'dash');
     this.model.setLevi(pc.levi ? (pc.levi.phase === 'dash' ? 2 : 1) : 0, pc.vel);
@@ -971,7 +981,7 @@ export class Game {
       }
     }
 
-    this.audio.update(pc.feelSpeed, pc.boosting || pc.dashing, pc.dashing ? 1 : 0, pc.anyAttached);
+    this.audio.update(pc.feelSpeed, pc.boosting || pc.dashing || pc.groundDashing, pc.dashing || pc.groundDashing ? 1 : 0, pc.anyAttached);
     this.hud.update(dt, {
       pc,
       titan,
