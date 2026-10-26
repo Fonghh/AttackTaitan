@@ -6,13 +6,15 @@ const DEG = Math.PI / 180;
 /**
  * 把裝置角速度換成鏡頭的 yaw／pitch 角速度（弧度/秒）。
  * 裝置座標：x 往右、y 往上（沿螢幕）、z 從螢幕指向使用者。
- * 直立時：繞 y 軸（gamma）＝左右轉、繞 x 軸（beta）＝上下仰。螢幕旋轉時依角度換軸。
+ * 實際瀏覽器（iOS Safari、Android Chrome）的 rotationRate：alpha＝繞 x 軸、beta＝繞 y 軸、gamma＝繞 z 軸
+ * （和規格文字的命名不同，以實機為準）。
+ * 直立時：繞 y 軸＝左右轉、繞 x 軸＝上下仰。螢幕旋轉時依角度換軸。
  * @param {{alpha:number,beta:number,gamma:number}} rate 度/秒
  * @param {number} screenAngle 0 / 90 / 180 / 270（screen.orientation.angle）
  */
 export function gyroToLook(rate, screenAngle = 0) {
-  const bx = (rate.beta || 0) * DEG; // 繞裝置 x 軸
-  const gy = (rate.gamma || 0) * DEG; // 繞裝置 y 軸
+  const bx = (rate.alpha || 0) * DEG; // 繞裝置 x 軸
+  const gy = (rate.beta || 0) * DEG; // 繞裝置 y 軸
   const a = (((screenAngle % 360) + 360) % 360) * DEG;
   // 螢幕座標的軸＝裝置軸轉 -angle
   const c = Math.cos(a), s = Math.sin(a);
