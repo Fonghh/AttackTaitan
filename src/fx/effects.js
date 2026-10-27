@@ -29,6 +29,8 @@ class ParticlePool {
         void main() {
           vColor = pcolor;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          // 離鏡頭太近的粒子淡掉（近距離鏡頭時瓦斯雲不會糊住畫面）
+          vColor.a *= smoothstep(1.2, 4.5, -mv.z);
           gl_PointSize = size * uScale / max(0.1, -mv.z);
           gl_Position = projectionMatrix * mv;
         }`,
@@ -183,19 +185,64 @@ class SpeedLines {
   }
 }
 
-/** 鋼索：細圓柱連接發射器與鉤爪 */
+/** 可彎曲的管子：沿一串點建立圓管（鋼索下垂用），每幀更新頂點 */
+class BentTube {
+  constructor(segments, radial, radius, material) {
+    this.n = segments;
+    this.r = radial;
+    this.radius = radius;
+    const verts = (segments + 1) * radial;
+    this.pos = new Float32Array(verts * 3);
+    const idx = [];
+    for (let i = 0; i < segments; i++) {
+      for (let j = 0; j < radial; j++) {
+        const a = i * radial + j, b = i * radial + ((j + 1) % radial), c = a + radial, d = b + radial;
+        idx.push(a, c, b, b, c, d);
+      }
+    }
+    this.geo = new THREE.BufferGeometry();
+    this.geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    this.geo.setIndex(idx);
+    this.mesh = new THREE.Mesh(this.geo, material);
+    this.mesh.frustumCulled = false;
+  }
+
+  /** @param {THREE.Vector3[]} pts n+1 個點 */
+  update(pts, scale) {
+    const R = this.r;
+    for (let i = 0; i <= this.n; i++) {
+      const p = pts[i];
+      const q = pts[Math.min(this.n, i + 1)], o = pts[Math.max(0, i - 1)];
+      _v.subVectors(q, o).normalize(); // 切線
+      // 任一垂直向量
+      _v2.set(0, 1, 0);
+      if (Math.abs(_v.y) > 0.9) _v2.set(1, 0, 0);
+      _n1.crossVectors(_v, _v2).normalize();
+      _n2.crossVectors(_v, _n1);
+      for (let j = 0; j < R; j++) {
+        const a = (j / R) * Math.PI * 2;
+        const c = Math.cos(a) * this.radius * scale, s = Math.sin(a) * this.radius * scale;
+        const k = (i * R + j) * 3;
+        this.pos[k] = p.x + _n1.x * c + _n2.x * s;
+        this.pos[k + 1] = p.y + _n1.y * c + _n2.y * s;
+        this.pos[k + 2] = p.z + _n1.z * c + _n2.z * s;
+      }
+    }
+    this.geo.attributes.position.needsUpdate = true;
+  }
+}
+const _n1 = new THREE.Vector3();
+const _n2 = new THREE.Vector3();
+const ROPE_SEG = 14;
+
+/** 鋼索：發射器到鉤爪。放鬆時往下垂，重新繃緊時「啪」一下發亮、抖動 */
 class RopeVisual {
   constructor(scene, color) {
     // 核心（加粗）＋外層光暈，方便在高速中辨識
-    this.mesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.065, 0.065, 1, 6, 1, true).translate(0, 0.5, 0),
-      new THREE.MeshBasicMaterial({ color }),
-    );
-    this.glow = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.2, 0.2, 1, 8, 1, true).translate(0, 0.5, 0),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false }),
-    );
-    this.mesh.frustumCulled = this.glow.frustumCulled = false;
+    this.core = new BentTube(ROPE_SEG, 6, 0.065, new THREE.MeshBasicMaterial({ color }));
+    this.halo = new BentTube(ROPE_SEG, 8, 0.2, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false }));
+    this.mesh = this.core.mesh;
+    this.glow = this.halo.mesh;
     this.claw = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.6, 6), new THREE.MeshStandardMaterial({ color: '#cfd6dc', metalness: 0.8, roughness: 0.3 }));
     // 勾點標記：發光圓環，被建築擋住也看得到
     this.marker = new THREE.Mesh(
@@ -207,27 +254,43 @@ class RopeVisual {
     this.hide();
     this.baseColor = new THREE.Color(color);
     this.t = 0;
+    this.sag = 0;
+    this.snap = 0; // 重新繃緊的閃光／抖動
+    this.pts = Array.from({ length: ROPE_SEG + 1 }, () => new THREE.Vector3());
   }
 
-  set(from, to, taut, attached, camera, dt) {
+  /** ropeLen：繩長（比距離長＝放鬆下垂） */
+  set(from, to, taut, attached, camera, dt, ropeLen = 0) {
     _v.subVectors(to, from);
     const len = _v.length();
     if (len < 1e-3) return;
-    this.t += dt || 0;
+    dt = dt || 0;
+    this.t += dt;
     this.mesh.visible = this.claw.visible = true;
     this.glow.visible = attached;
-    this.mesh.position.copy(from);
-    this.glow.position.copy(from);
-    _v.multiplyScalar(1 / len);
-    _q.setFromUnitVectors(_Y, _v);
-    this.mesh.quaternion.copy(_q);
-    this.glow.quaternion.copy(_q);
-    // 飛行中細、勾住後粗；繃緊時最亮
-    const w = attached ? (taut ? 1.0 : 0.85) : 0.6;
-    this.mesh.scale.set(w, len, w);
-    this.glow.scale.set(w, len, w);
-    this.mesh.material.color.copy(this.baseColor).multiplyScalar(attached ? (taut ? 1.35 : 1.0) : 0.8);
+    // 下垂量：繩子比距離長多少（懸鏈線近似），最多 14m；繃緊時快速收回並觸發「啪」
+    const slack = attached ? Math.max(0, ropeLen - len) : 0;
+    const want = Math.min(14, Math.sqrt(0.375 * len * slack));
+    if (this.sag > 1.2 && want < 0.3) this.snap = 1;
+    this.sag += (want - this.sag) * Math.min(1, dt * (want < this.sag ? 18 : 6));
+    this.snap = Math.max(0, this.snap - dt * 3.5);
+    // 抖動方向：垂直於繩子的水平方向
+    _n1.set(-_v.z, 0, _v.x).normalize();
+    for (let i = 0; i <= ROPE_SEG; i++) {
+      const u = i / ROPE_SEG;
+      const bell = 4 * u * (1 - u);
+      const p = this.pts[i].copy(from).addScaledVector(_v, u);
+      p.y -= this.sag * bell;
+      if (this.snap > 0) p.addScaledVector(_n1, Math.sin(u * Math.PI * 3 - this.t * 60) * this.snap * 0.5 * bell);
+    }
+    // 飛行中細、勾住後粗；繃緊時最亮；重新繃緊瞬間更粗更亮
+    const w = (attached ? (taut ? 1.0 : 0.85) : 0.6) * (1 + this.snap * 0.8);
+    this.core.update(this.pts, w);
+    this.halo.update(this.pts, w);
+    this.mesh.material.color.copy(this.baseColor).multiplyScalar((attached ? (taut ? 1.35 : 1.0) : 0.8) + this.snap * 1.5);
+    this.glow.material.opacity = 0.28 + this.snap * 0.5;
     this.claw.position.copy(to);
+    _q.setFromUnitVectors(_Y, _v.multiplyScalar(1 / len));
     this.claw.quaternion.copy(_q);
     // 勾點標記：面向鏡頭，依距離放大，輕微脈動
     this.marker.visible = attached && !!camera;
@@ -241,7 +304,40 @@ class RopeVisual {
 
   hide() {
     this.mesh.visible = this.claw.visible = this.glow.visible = this.marker.visible = false;
+    this.sag = 0;
   }
+}
+
+/** 風壓漩渦：圓錐形的透明管，貼上斜向的風紋，沿飛行方向旋轉 */
+function makeSwirl() {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 128;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 256, 128);
+  for (let i = 0; i < 26; i++) {
+    const y = Math.random() * 128, w = 40 + Math.random() * 120, x = Math.random() * 256;
+    const grad = g.createLinearGradient(x, 0, x + w, 0);
+    grad.addColorStop(0, 'rgba(255,255,255,0)');
+    grad.addColorStop(0.5, `rgba(235,250,255,${0.4 + Math.random() * 0.5})`);
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.strokeStyle = grad;
+    g.lineWidth = 1 + Math.random() * 3;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + w, y + 18);
+    g.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 1);
+  const m = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.7, 1.7, 3.2, 20, 1, true),
+    new THREE.MeshBasicMaterial({ map: tex, color: '#dff8ef', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  m.frustumCulled = false;
+  m.visible = false;
+  return m;
 }
 
 /** 刀光弧 */
@@ -388,8 +484,10 @@ class BladeStreaks {
 
 export class Effects {
   constructor(scene, cfg) {
-    this.glow = new ParticlePool(scene, 500, true);
-    this.smoke = new ParticlePool(scene, 700, false);
+    this.glow = new ParticlePool(scene, 700, true);
+    this.smoke = new ParticlePool(scene, 1100, false);
+    this.swirl = makeSwirl();
+    scene.add(this.swirl);
     this.speedLines = new SpeedLines(scene, cfg.speedLines);
     this.ropes = { left: new RopeVisual(scene, '#9fb8c8'), right: new RopeVisual(scene, '#c8b89f') };
     this.slashes = new SlashArcs(scene);
@@ -439,6 +537,57 @@ export class Effects {
         max: 0.5 + Math.random() * 0.4, s0: 0.35, s1: 1.6, r: 0.95, g: 0.97, b: 1, a: strong ? 0.55 : 0.3, drag: 3,
       });
     }
+  }
+
+  /**
+   * 瓦斯雲軌跡：飛行時身後一團一團的白色瓦斯，停留一秒多、慢慢擴散，把飛行路線畫在空中。
+   * @param {number} k 濃度 0～1（衝刺最濃）
+   */
+  gasTrail(pos, vel, k) {
+    this._gasAcc = (this._gasAcc || 0) + 1.2 + k * 3.2;
+    const sp = vel.length() || 1;
+    while (this._gasAcc >= 1) {
+      this._gasAcc -= 1;
+      const back = 0.5 + Math.random() * 0.6;
+      this.smoke.spawn({
+        x: pos.x - (vel.x / sp) * back + (Math.random() - 0.5) * 0.5,
+        y: pos.y + 0.15 - (vel.y / sp) * back + (Math.random() - 0.5) * 0.5,
+        z: pos.z - (vel.z / sp) * back + (Math.random() - 0.5) * 0.5,
+        vx: vel.x * 0.04 + (Math.random() - 0.5) * 2.2, vy: vel.y * 0.04 + (Math.random() - 0.3) * 1.6, vz: vel.z * 0.04 + (Math.random() - 0.5) * 2.2,
+        max: 1.0 + Math.random() * 0.7 + k * 0.4, s0: 0.5 + k * 0.3, s1: 2.6 + k * 1.4, r: 0.96, g: 0.97, b: 1, a: 0.42 + k * 0.3, drag: 1.6,
+      });
+    }
+  }
+
+  /** 刀刃擦地／擦牆的火花 */
+  sparks(point, vel, n = 6) {
+    for (let i = 0; i < n; i++) {
+      this.glow.spawn({
+        x: point.x, y: point.y, z: point.z,
+        vx: -vel.x * 0.25 + (Math.random() - 0.5) * 9, vy: 2 + Math.random() * 7, vz: -vel.z * 0.25 + (Math.random() - 0.5) * 9,
+        max: 0.2 + Math.random() * 0.3, s0: 0.16 + Math.random() * 0.12, s1: 0.03, r: 1, g: 0.6 + Math.random() * 0.3, b: 0.15, grav: 26, drag: 1.2,
+      });
+    }
+  }
+
+  /** 風壓漩渦：高速繞圈、衝刺、兵長斬時身邊的旋風。k = 0～1 */
+  updateSwirl(dt, pos, vel, k) {
+    const m = this.swirl;
+    const mat = m.material;
+    mat.opacity += (k * 0.55 - mat.opacity) * Math.min(1, dt * 8);
+    m.visible = mat.opacity > 0.02;
+    if (!m.visible) return;
+    const sp = vel.length();
+    if (sp > 1) {
+      _v.copy(vel).multiplyScalar(1 / sp);
+      _q.setFromUnitVectors(_Y, _v);
+      m.quaternion.slerp(_q, Math.min(1, dt * 12));
+    }
+    m.position.copy(pos).addScaledVector(_v, -0.6);
+    m.position.y += 0.2;
+    m.scale.set(1, 1 + k * 0.8, 1);
+    mat.map.offset.x -= dt * (2.5 + k * 3);
+    mat.map.offset.y -= dt * 1.5;
   }
 
   dust(pos, vel, amount) {
@@ -586,7 +735,13 @@ export class Effects {
       model.launcherWorld(side, _from);
       if (h.attached) h.anchor(_to);
       else _to.copy(h.head);
-      r.set(_from, _to, h.attached && h.taut, h.attached, camera, dt);
+      r.set(_from, _to, h.attached && h.taut, h.attached, camera, dt, h.length);
+      // 鉤爪飛行中：沿路留下白色光跡
+      if (!h.attached) {
+        for (let i = 0; i < 2; i++) {
+          this.glow.spawn({ x: _to.x + (Math.random() - 0.5) * 0.3, y: _to.y + (Math.random() - 0.5) * 0.3, z: _to.z + (Math.random() - 0.5) * 0.3, vx: 0, vy: 0, vz: 0, max: 0.35, s0: 0.45, s1: 0.05, r: 0.9, g: 0.95, b: 1, a: 0.9 });
+        }
+      }
     }
   }
 

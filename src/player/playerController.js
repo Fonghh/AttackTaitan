@@ -56,6 +56,8 @@ export class PlayerController {
     this.capBoost = 0; // 放開衝刺後保留的最高速度上限（慢慢降）
     this.groundDashTimer = 0;
     this.groundDashing = false;
+    this.accel = new Vector3(); // 平滑過的加速度（鏡頭側傾、身體傾斜用）
+    this._prevVel = new Vector3();
     this.wallCarry = new Vector3(); // 撞牆損失的水平速度
     this.wallCarryTimer = 0;
     this.carry = new Vector3(); // 放索後等待歸還的水平速度
@@ -450,6 +452,12 @@ export class PlayerController {
     if (this.levi || this.groundDashTimer > 0) cap = Math.max(cap, this.speed);
     softLimitSpeed(this.vel, cap, P.softLimitRate, dt);
     this.maxSpeed = Math.max(this.maxSpeed, this.speed);
+    if (dt > 1e-5) {
+      _tmp.subVectors(this.vel, this._prevVel).multiplyScalar(1 / dt);
+      if (_tmp.lengthSq() > 250000) _tmp.setLength(500); // 碰撞瞬間的尖峰不要
+      this.accel.lerp(_tmp, Math.min(1, dt * 8));
+    }
+    this._prevVel.copy(this.vel);
     if (hitWall) this.emit('bump', {});
   }
 

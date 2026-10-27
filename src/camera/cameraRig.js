@@ -15,6 +15,7 @@ export class CameraRig {
     this.forward = new THREE.Vector3(0, 0, -1);
     this.offset = new THREE.Vector3(0, 2, 6);
     this.followDir = new THREE.Vector3(0, 0, -1);
+    this.punchDir = new THREE.Vector3();
     this.reset(0);
   }
 
@@ -29,7 +30,19 @@ export class CameraRig {
     this.lastManualLook = -10;
     this.distSmooth = this.cfg.camera.distance;
     this.time = 0;
+    this.roll = 0;
+    this.yawRate = 0;
+    this._lastYaw = yaw;
+    this.punchT = 0;
+    this.locked = false;
     this.followDir.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+  }
+
+  /** 命中瞬間：鏡頭往命中點推近一下 */
+  punch(point) {
+    const P = this.cfg.camera.punch;
+    this.punchDir.subVectors(point, this.camera.position);
+    this.punchT = P.time;
   }
 
   /** 鏡頭推拉：負值＝往前推（視角變窄），正值＝拉寬，之後自動回復 */
@@ -99,8 +112,22 @@ export class CameraRig {
       this.yaw -= Math.sign(opts.joyX) * k * J.rate * opts.joyTurn * (opts.realDt ?? dt);
       this.lastManualLook = this.time;
     }
+    // 鎖定鏡頭：對準目標巨人（手動轉鏡頭後一小段時間不搶）
+    const LK = C.lock;
+    this.locked = !!opts.lockTarget;
+    if (opts.lockTarget && this.time - this.lastManualLook > LK.manualPause) {
+      _dir.subVectors(opts.lockTarget, pc.pos);
+      _dir.y -= C.targetHeight + LK.raise * 0.5;
+      const ty = Math.atan2(-_dir.x, -_dir.z);
+      const tp = Math.max(-1.1, Math.min(1.1, Math.atan2(_dir.y, Math.hypot(_dir.x, _dir.z))));
+      let d = ty - this.yaw;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      const k = Math.min(1, LK.rate * (opts.realDt ?? dt));
+      this.yaw += d * k;
+      this.pitch += (tp - this.pitch) * k;
+    }
     // 鉤住時跟隨人物面朝方向（手動拖曳轉視角後 0.5 秒內不干擾）
-    if (opts.followYaw != null && this.time - this.lastManualLook > 0.5) {
+    if (!opts.lockTarget && opts.followYaw != null && this.time - this.lastManualLook > 0.5) {
       let d = opts.followYaw - this.yaw;
       d = Math.atan2(Math.sin(d), Math.cos(d));
       const k = Math.min(1, C.hookFollowRate * dt);
@@ -110,7 +137,7 @@ export class CameraRig {
     }
     const delay = opts.touch ? C.autoFollowDelayTouch : C.autoFollowDelayMouse;
     const fl = Math.hypot(this.followDir.x, this.followDir.z);
-    if (opts.autoFollow && this.time - this.lastManualLook > delay && !pc.grounded && hs > 8 && fl > 0.3) {
+    if (!opts.lockTarget && opts.autoFollow && this.time - this.lastManualLook > delay && !pc.grounded && hs > 8 && fl > 0.3) {
       const ty = Math.atan2(-this.followDir.x, -this.followDir.z);
       let d = ty - this.yaw;
       d = Math.atan2(Math.sin(d), Math.cos(d));
@@ -124,10 +151,13 @@ export class CameraRig {
     this.updateForward();
     const f = this.forward;
 
-    // 速度帶來的距離與 FOV
+    // 速度帶來的距離與 FOV（近距離廣角鏡頭：角色更大、FOV 拉更開）
     // 衝刺時鏡頭拉近角色，平常速度越快拉越遠
-    const tgtDist = opts.close ? -2.2 : Math.min(C.maxExtraDist, Math.max(0, speed - 8) * C.distPerSpeed);
-    const tgtFov = Math.min(C.maxExtraFov, Math.max(0, speed - 10) * C.fovPerSpeed);
+    const CL = opts.closeCam ? C.close : null;
+    const baseDist = CL ? CL.distance : C.distance;
+    const maxExtra = CL ? CL.maxExtraDist : C.maxExtraDist;
+    const tgtDist = opts.close ? -Math.min(2.2, baseDist * 0.4) : Math.min(maxExtra, Math.max(0, speed - 8) * C.distPerSpeed);
+    const tgtFov = Math.min(CL ? CL.maxExtraFov : C.maxExtraFov, Math.max(0, speed - 10) * (CL ? CL.fovPerSpeed : C.fovPerSpeed));
     const kk = 1 - Math.exp(-3 * dt);
     this.extraDist += (tgtDist - this.extraDist) * kk;
     this.extraFov += (tgtFov - this.extraFov) * kk;
@@ -135,11 +165,15 @@ export class CameraRig {
     // 目標點：角色上方，並加一點速度前導，方便預判下一勾
     _target.copy(pc.pos);
     _target.y += C.targetHeight;
-    const dist = C.distance + this.extraDist;
+    const dist = baseDist + this.extraDist;
 
+    // 貼地高速飛行：鏡頭壓低，地面從旁邊刷過去
+    const G = C.groundSkim;
+    const skim = !pc.grounded && pc.pos.y < G.height && speed > G.minSpeed ? 1 - pc.pos.y / G.height : 0;
+    this.skim = (this.skim || 0) + (skim - (this.skim || 0)) * Math.min(1, dt * 4);
     _right.set(-f.z, 0, f.x).normalize();
     _desired.copy(f).multiplyScalar(-dist).addScaledVector(_right, C.shoulder);
-    _desired.y += 0.6 - (opts.lowAngle || 0) * 1.6; // 靠近巨人時鏡頭壓低
+    _desired.y += 0.6 - (opts.lowAngle || 0) * 1.6 - this.skim * G.drop + (this.locked ? C.lock.raise : 0); // 靠近巨人時鏡頭壓低
 
     // 平滑的是「相對位移」，所以高速時不會落後角色
     const ko = 1 - Math.exp(-C.offsetSmooth * dt);
@@ -169,9 +203,33 @@ export class CameraRig {
       this.shake = Math.max(0, this.shake - dt * 2.5);
     }
 
+    // 命中推近
+    if (this.punchT > 0) {
+      const P = this.cfg.camera.punch;
+      this.punchT -= opts.realDt ?? dt;
+      const k = Math.sin(Math.max(0, this.punchT / P.time) * Math.PI);
+      cam.position.addScaledVector(this.punchDir, P.amount * k * 0.5);
+    }
+
     // 看向準星方向（準星 = 畫面中心 = forward 射線）
     _target.copy(cam.position).add(f);
     cam.lookAt(_target);
+
+    // 側傾：側向加速度往哪邊，鏡頭就往哪邊傾（像飛機轉彎）
+    // 傾斜來源：鏡頭轉動的速度（繞圈、轉彎時往彎內傾）＋側向加速度（擺盪甩動）
+    const R = C.roll;
+    let dyaw = this.yaw - this._lastYaw;
+    dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
+    this._lastYaw = this.yaw;
+    if (dt > 1e-5) this.yawRate += (dyaw / dt - this.yawRate) * Math.min(1, dt * 6);
+    let tgtRoll = 0;
+    if (opts.rollLevel > 0 && pc.accel && !pc.grounded) {
+      const lat = pc.accel.x * _right.x + pc.accel.z * _right.z;
+      const max = (R.maxDeg * Math.PI) / 180;
+      tgtRoll = Math.max(-max, Math.min(max, this.yawRate * R.perYawRate - lat * R.perAccel)) * opts.rollLevel;
+    }
+    this.roll += (tgtRoll - this.roll) * Math.min(1, R.rate * dt);
+    if (Math.abs(this.roll) > 1e-4) cam.rotateZ(this.roll);
 
     // FOV：直立手機保證最小水平視角
     const aspect = cam.aspect;

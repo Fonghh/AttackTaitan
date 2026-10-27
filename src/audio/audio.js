@@ -126,6 +126,14 @@ export class Audio {
         this._tone({ dur: 0.15, type: 'sine', f0: 200, f1: 80, vol: 0.35 });
         this._noiseBurst({ dur: 0.15, type: 'lowpass', f0: 1500, f1: 300, vol: 0.3 });
         break;
+      case 'scrape': // 刀刃刮地／刮牆
+        this._noiseBurst({ dur: 0.12, type: 'bandpass', f0: 5200, f1: 3600, q: 6, vol: 0.12, attack: 0.005 });
+        this._tone({ dur: 0.08, type: 'sawtooth', f0: 3100 + Math.random() * 600, f1: 2600, vol: 0.025 });
+        break;
+      case 'killBoom': // 擊殺：低沉爆裂
+        this._tone({ dur: 0.9, type: 'sine', f0: 90, f1: 30, vol: 0.8 });
+        this._noiseBurst({ dur: 0.8, type: 'lowpass', f0: 1800, f1: 120, vol: 0.55 });
+        break;
       case 'miss':
         this._noiseBurst({ dur: 0.15, f0: 4000, f1: 2000, q: 2, vol: 0.2 });
         break;

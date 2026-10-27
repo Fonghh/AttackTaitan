@@ -138,6 +138,7 @@ try {
     g.restart(true);
     g.renderer.setAnimationLoop(null);
     g.pc.ropeStyle = 'pull';
+    g.closeCam = false; // 這段測物理：用標準鏡頭距離，讓瞄準點固定（近距離鏡頭會讓射線起點不同）
     g.pc.speedScale = 1;
     const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
     const run = (it) => { for (const e of it.events) g._handleEvent(e); g.step(1 / 60, it); };
@@ -168,6 +169,7 @@ try {
     const travel = Math.hypot(g.pc.pos.x - start.x, g.pc.pos.z - start.z);
     return { anchorY, maxPull, maxY, maxJump, travel, events: [...ev], strikes: g.stats.strikes };
   });
+  await page.evaluate(() => (window.__game.closeCam = true));
   check('[pull] rope pulls the player toward the anchor (slower, controllable)', pull.maxPull > 28 && pull.maxPull < 55, `${pull.maxPull.toFixed(1)} m/s`);
   check('[pull] rope stays attached until tapped again; release launches upward', pull.events.includes('arrive') && pull.events.includes('fling'), pull.events.join(','));
   check('[pull] flies over the roof and keeps going', pull.events.includes('vault') && pull.maxY > pull.anchorY + 8 && pull.travel > 80, `peak ${pull.maxY.toFixed(0)}m (anchor ${pull.anchorY.toFixed(0)}m), travel ${pull.travel.toFixed(0)}m`);
@@ -642,13 +644,29 @@ try {
     const survived = dummy.alive && dummy.hp >= 1;
     for (let i = 0; i < 200; i++) g.step(1 / 60, base());
     const regen = dummy.hp === g.cfg.titan.hp;
+    // 鎖定鏡頭＋側傾：勾在木人身上往側邊推 → 鏡頭鎖定、側傾；斬到後頸留下傷口
+    const V = g.pc.pos.constructor;
+    let mesh = null;
+    dummy.root.traverse((o) => { if (!mesh && o.isMesh && o.userData.titanPart) mesh = o; });
+    const nape = dummy.napeWorld(new V());
+    g.pc.pos.set(nape.x + 30, nape.y + 4, nape.z + 15);
+    g.pc.vel.set(0, 0, 0);
+    g.pc.fireHook('right', g.pc.pos.clone(), { point: nape.clone(), object: mesh });
+    for (let i = 0; i < 100; i++) g.step(1 / 60, { ...base(), move: { x: 1, y: 0 } });
+    const cam = { locked: g.rig.locked, roll: +g.rig.roll.toFixed(3) };
+    const ev = g._evaluate();
+    ev.damage = 40;
+    g._napeHit(ev, false);
+    cam.wounds = dummy.wounds.length;
+    g.pc.releaseAll();
     const texts = [g.hud.el.mission.textContent];
     for (const s of ['hook', 'fling', 'dash', 'leg', 'nape', 'levi']) g._missionEvent(s);
     texts.push(g.hud.el.mission.textContent);
     for (let i = 0; i < 60; i++) g.step(1 / 60, base());
-    return { survived, regen, texts, state: g.state, title: document.getElementById('result-title').textContent, stars: document.querySelector('.result-stars')?.textContent, next: !document.getElementById('btn-next').hidden };
+    return { cam, survived, regen, texts, state: g.state, title: document.getElementById('result-title').textContent, stars: document.querySelector('.result-stars')?.textContent, next: !document.getElementById('btn-next').hidden };
   });
   check('[training] wooden dummies never die and heal back', training.survived && training.regen, JSON.stringify(training));
+  check('[camera] hooked on a titan: camera locks on and banks into the orbit; hits leave wounds', training.cam.locked && Math.abs(training.cam.roll) > 0.05 && training.cam.wounds > 0, JSON.stringify(training.cam));
   check('[training] finishing all 6 steps completes the level, shows stars and unlocks the next level', training.state === 'won' && /★/.test(training.stars || '') && training.next, JSON.stringify(training));
   const rings = await levelRun('rings', () => {
     const g = window.__game;

@@ -959,3 +959,31 @@ body.no-titans #strike-checks {
   font-size: 11px;
   color: #ffe7a8;
 }
+
+/* 擊殺／完美斬擊：全螢幕金色放射光 */
+#killburst {
+  position: fixed;
+  inset: -20%;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 252, 225, 0.95) 0%, rgba(255, 215, 90, 0.75) 18%, rgba(255, 170, 40, 0.3) 40%, transparent 62%),
+    repeating-conic-gradient(from 0deg at 50% 50%, rgba(255, 230, 140, 0.85) 0deg 2.5deg, transparent 3deg 9deg);
+  mix-blend-mode: screen;
+  z-index: 3;
+}
+#killburst.go {
+  animation: killburst 0.65s ease-out;
+}
+#killburst.go.small {
+  animation-duration: 0.4s;
+}
+@keyframes killburst {
+  0% { opacity: 0; transform: scale(0.6) rotate(0deg); }
+  12% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.6) rotate(12deg); }
+}
+body.cam-locked #titan-hp-text::before {
+  content: '◎ 鎖定　';
+  color: #ff8a5c;
+}

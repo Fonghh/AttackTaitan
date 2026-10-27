@@ -179,8 +179,14 @@ export class PlayerModel {
     } else {
       _q.identity();
     }
-    // 轉向時側傾
-    _q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -dy * 1.5));
+    // 側傾：跟著側向加速度壓向彎內（繞圈、擺盪轉彎時整個人斜躺）
+    let bank = -dy * 1.5;
+    if (airborne && pc.accel) {
+      const lat = pc.accel.x * Math.cos(this.yaw) - pc.accel.z * Math.sin(this.yaw);
+      bank = Math.max(-1.1, Math.min(1.1, -lat / 26)) + bank * 0.3;
+    }
+    this.bank = bank;
+    _q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), bank));
     this.lean.slerp(_q, Math.min(1, dt * 8));
     this.body.quaternion.copy(this.lean);
     if (this.leviMode) {
@@ -229,27 +235,45 @@ export class PlayerModel {
       this.hips.position.y = 0.6;
       this.armL.shoulder.rotation.x = -0.6;
       this.armR.shoulder.rotation.x = -0.6;
-    } else if (airborne) {
-      // 飛行姿勢：雙腿併攏微彎，雙刀向後
-      const flap = Math.sin(t * 9) * 0.05;
-      L.hip.rotation.x = 0.35 + flap;
-      R.hip.rotation.x = 0.2 - flap;
-      L.knee.rotation.x = -0.7;
-      R.knee.rotation.x = -0.5;
+    } else if (airborne && (pc.dashing || pc.levi)) {
+      // 衝刺：縮身前衝，雙刀往後拖
+      L.hip.rotation.x = 1.05;
+      R.hip.rotation.x = 0.85;
+      L.knee.rotation.x = -1.4;
+      R.knee.rotation.x = -1.2;
       this.hips.position.y = 0.95;
-      this.armL.shoulder.rotation.x = -0.7;
-      this.armR.shoulder.rotation.x = -0.7;
+      this.armL.shoulder.rotation.x = this.armR.shoulder.rotation.x = -1.65;
+    } else if (airborne) {
+      // 飛行姿勢：速度越快雙刀越往後張開、雙腿越往後拖
+      const k = Math.max(0, Math.min(1, (speed - 10) / 35));
+      const flap = Math.sin(t * 9) * 0.05;
+      L.hip.rotation.x = 0.35 + 0.35 * k + flap;
+      R.hip.rotation.x = 0.2 + 0.3 * k - flap;
+      L.knee.rotation.x = -0.7 + 0.2 * k;
+      R.knee.rotation.x = -0.5 + 0.2 * k;
+      this.hips.position.y = 0.95;
+      this.armL.shoulder.rotation.x = -0.7 - 0.75 * k;
+      this.armR.shoulder.rotation.x = -0.7 - 0.75 * k;
     } else {
       L.hip.rotation.x = R.hip.rotation.x = 0;
       L.knee.rotation.x = R.knee.rotation.x = 0;
       this.armL.shoulder.rotation.x = this.armR.shoulder.rotation.x = Math.sin(t * 2) * 0.03;
       this.hips.position.y = 0.95;
     }
-    this.armL.shoulder.rotation.z = -0.25;
-    this.armR.shoulder.rotation.z = 0.25;
+    // 手臂張開：飛越快張越開
+    const spread = airborne ? 0.25 + Math.max(0, Math.min(1, (speed - 10) / 35)) * 0.55 : 0.25;
+    this.armL.shoulder.rotation.z = -spread;
+    this.armR.shoulder.rotation.z = spread;
     this.armL.fore.rotation.x = -0.5;
     this.armR.fore.rotation.x = -0.5;
     this.armL.sword.rotation.x = this.armR.sword.rotation.x = 0;
+    if (pc.sliding && hs > 6) {
+      // 滑行／滑鏟：右手的刀壓低拖在地上（刮出火花）
+      this.armR.shoulder.rotation.x = 0.35;
+      this.armR.shoulder.rotation.z = 1.15;
+      this.armR.fore.rotation.x = -0.15;
+      this.armR.sword.rotation.x = -0.7;
+    }
 
     // 斬擊動作：雙臂由上往下交叉揮砍
     if (this.slashTimer > 0) {

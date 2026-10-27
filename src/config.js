@@ -239,6 +239,22 @@ export const CONFIG = {
     followSmoothTime: 0.4, // 飛行方向的平滑時間（擺盪時不會急轉）
     followPitch: -0.14,
     // 手機：空中推左搖桿左右＝鏡頭跟著轉（和右邊準心搖桿的轉動相加，不衝突）
+    // 鎖定鏡頭：鋼索勾在巨人身上時，鏡頭自動對準那隻巨人（左搖桿左右＝繞著牠轉）
+    lock: {
+      enabled: true,
+      rate: 5, // 轉向目標的速度（每秒）
+      manualPause: 0.7, // 手動轉鏡頭後幾秒內不搶鏡頭
+      breakAfter: 0.5, // 準心推到邊緣持續轉鏡頭超過這麼久＝解除鎖定（直到下次勾住）
+      aimDrop: 2.5, // 對準點 = 後頸往下 × 巨人體型（畫面裡看得到上半身）
+      raise: 1.4, // 鎖定時鏡頭往上抬，角色落在畫面下方前景
+    },
+    // 鏡頭側傾：依側向加速度（繞圈、擺盪轉彎）傾斜，像飛機轉彎
+    // perYawRate：鏡頭每秒轉 1 弧度時傾斜多少弧度（繞圈、轉彎時往彎內傾）
+    roll: { levels: { high: 1, low: 0.5, off: 0 }, defaultLevel: 'high', maxDeg: 18, perAccel: 0.012, perYawRate: 0.32, rate: 6 },
+    // 近距離廣角鏡頭：角色更大、背景掠過更快
+    close: { enabled: true, distance: 4.3, maxExtraDist: 2.8, fovPerSpeed: 0.42, maxExtraFov: 34 },
+    groundSkim: { height: 4, minSpeed: 15, drop: 1.0 }, // 貼地高速飛行時鏡頭壓低
+    punch: { amount: 0.4, time: 0.28 }, // 命中時鏡頭往命中點推近（比例）
     // 手機：陀螺儀瞄準（轉動手機＝轉動鏡頭），倍率 1 = 手機轉多少鏡頭就轉多少
     gyro: {
       levels: { off: 0, low: 0.7, mid: 1.2, high: 1.8 },

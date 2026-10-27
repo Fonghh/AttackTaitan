@@ -68,6 +68,14 @@ export class Hud {
     });
   }
 
+  /** 全螢幕金色放射光（擊殺＝大、完美斬擊＝小） */
+  killBurst(big = true) {
+    const el = document.getElementById('killburst');
+    el.className = '';
+    void el.offsetWidth; // 重新觸發動畫
+    el.className = big ? 'go' : 'go small';
+  }
+
   hurt() {
     const h = this.el.hurt;
     h.style.transition = 'none';

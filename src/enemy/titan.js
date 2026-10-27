@@ -159,6 +159,8 @@ export class Titan {
     this.kneelTimer = 0; // 腳被砍：跪下
     this.kneelAmount = 0;
     this.regenTimer = 0;
+    for (const w of this.wounds || []) w.mesh.parent?.remove(w.mesh);
+    this.wounds = [];
     this.deadTime = 0;
     this.gone = false;
     this.holding = false;
@@ -210,11 +212,35 @@ export class Titan {
     return this.armL.hand.getWorldPosition(out);
   }
 
+  /** 在命中點留下傷口（附著在最近的身體部位上，跟著動、會冒蒸氣，約 15 秒後淡掉） */
+  addWound(point, size = 1) {
+    let best = this.fall, bd = Infinity;
+    for (const g of [this.neck, this.head, this.chest, this.pelvis, this.legL.hip, this.legL.knee, this.legR.hip, this.legR.knee]) {
+      const d = g.getWorldPosition(_v).distanceTo(point);
+      if (d < bd) {
+        bd = d;
+        best = g;
+      }
+    }
+    const mat = new THREE.MeshBasicMaterial({ color: '#7a0d0d', transparent: true, opacity: 0.95, depthWrite: false });
+    const m = new THREE.Mesh(this._woundGeo || (this._woundGeo = new THREE.SphereGeometry(0.7, 8, 6)), mat);
+    best.worldToLocal(m.position.copy(point));
+    m.scale.set(size * (0.8 + Math.random() * 0.6), size * 0.35, size * (0.8 + Math.random() * 0.6));
+    m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    m.userData.noHook = true;
+    best.add(m);
+    this.wounds.push({ mesh: m, t: 15 });
+    if (this.wounds.length > 10) {
+      const old = this.wounds.shift();
+      old.mesh.parent?.remove(old.mesh);
+    }
+  }
+
   takeHit(damage, isNape) {
     if (!this.alive) return;
     this.hp = Math.max(this.dummy ? 1 : 0, this.hp - damage);
     this.regenTimer = 2.5;
-    this.hitFlash = isNape ? 0.35 : 0.15;
+    this.hitFlash = isNape ? 0.45 : 0.3;
     if (this.hp <= 0) {
       this._die();
     } else if (isNape) {
@@ -228,7 +254,7 @@ export class Titan {
     if (!this.alive) return;
     this.hp = Math.max(this.dummy ? 1 : 0, this.hp - damage);
     this.regenTimer = 2.5;
-    this.hitFlash = 0.2;
+    this.hitFlash = 0.35;
     if (this.hp <= 0) {
       this._die();
       return;
@@ -594,8 +620,19 @@ export class Titan {
     this.napeMat.emissiveIntensity = this.alive ? pulse : 0.2;
     this.eyeMat.emissiveIntensity = this.stunTimer > 0 || !this.alive ? 0 : 0.6;
     this.eyeMat.color.set(this.stunTimer > 0 ? '#5a1010' : '#fff7d6');
-    const hf = this.hitFlash > 0 ? 1 : 0;
-    this.skin.emissive.setRGB(0.4 * hf, 0.22 * hf, 0.15 * hf);
+    // 受擊：整隻閃紅，逐漸退回
+    const hf = Math.max(0, Math.min(1, this.hitFlash / 0.25));
+    this.skin.emissive.setRGB(1.1 * hf, 0.08 * hf, 0.05 * hf);
+    // 傷口：慢慢淡掉
+    for (let i = this.wounds.length - 1; i >= 0; i--) {
+      const w = this.wounds[i];
+      w.t -= dt;
+      w.mesh.material.opacity = Math.min(0.95, w.t / 3);
+      if (w.t <= 0) {
+        w.mesh.parent?.remove(w.mesh);
+        this.wounds.splice(i, 1);
+      }
+    }
     const warnR = s === 'windup' ? Math.min(1, k / T.windup) : 0;
     this.handMatR.emissive.setRGB(warnR * 0.9, 0.05 * warnR, 0);
     const warnL = s === 'grabWindup' ? Math.min(1, k / T.grabWindup) : s === 'grabReach' ? 1 : 0;

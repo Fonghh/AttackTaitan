@@ -23,6 +23,8 @@ const _right = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _aimDir = new THREE.Vector3();
 /** 迴旋斬傷害：一般斬擊 × spinDamageBonus */
+const _aimLock = new THREE.Vector3();
+const _bladeTip = new THREE.Vector3();
 const napeDamageSpin = (speed, cfg) => napeDamage(speed, cfg) * cfg.strike.spinDamageBonus;
 
 /** 沒有巨人的關卡（光圈競速）用的替身：永遠「已死亡」，讓目標相關的程式不用到處判斷 null */
@@ -112,6 +114,10 @@ export class Game {
     this.gyro = new Gyro();
     this.gyroLevel = this._load('gyro', cfg.camera.gyro.defaultLevel);
     if (!(this.gyroLevel in cfg.camera.gyro.levels)) this.gyroLevel = cfg.camera.gyro.defaultLevel;
+    this.lockCam = this._load('lockCam', cfg.camera.lock.enabled ? 'on' : 'off') === 'on';
+    this.closeCam = this._load('closeCam', cfg.camera.close.enabled ? 'on' : 'off') === 'on';
+    this.camRollLevel = this._load('camRoll', cfg.camera.roll.defaultLevel);
+    if (!(this.camRollLevel in cfg.camera.roll.levels)) this.camRollLevel = cfg.camera.roll.defaultLevel;
     this.joyTurnLevel = this._load('joyTurn', cfg.camera.joyTurn.defaultLevel);
     if (!(this.joyTurnLevel in cfg.camera.joyTurn.levels)) this.joyTurnLevel = cfg.camera.joyTurn.defaultLevel;
     this.speedLineLevel = this._load('speedLines', cfg.speedLines.defaultLevel);
@@ -217,6 +223,22 @@ export class Game {
       this._save('gyro', this.gyroLevel);
       this._syncModeLabel();
     });
+    $('btn-lockcam').addEventListener('click', () => {
+      this.lockCam = !this.lockCam;
+      this._save('lockCam', this.lockCam ? 'on' : 'off');
+      this._syncModeLabel();
+    });
+    $('btn-closecam').addEventListener('click', () => {
+      this.closeCam = !this.closeCam;
+      this._save('closeCam', this.closeCam ? 'on' : 'off');
+      this._syncModeLabel();
+    });
+    $('btn-camroll').addEventListener('click', () => {
+      const order = ['high', 'low', 'off'];
+      this.camRollLevel = order[(order.indexOf(this.camRollLevel) + 1) % order.length];
+      this._save('camRoll', this.camRollLevel);
+      this._syncModeLabel();
+    });
     $('btn-joyturn').addEventListener('click', () => {
       const order = ['high', 'mid', 'low', 'off'];
       this.joyTurnLevel = order[(order.indexOf(this.joyTurnLevel) + 1) % order.length];
@@ -274,6 +296,9 @@ export class Game {
     document.getElementById('dash-val').textContent = `衝刺 ${Math.round(this.pc.dashScale * 100)}%（${Math.round(this.cfg.dash.speed * this.pc.dashScale)} m/s）`;
     document.getElementById('reel-val').textContent = this.pc.autoReel > 0 ? `自動收繩 ${this.pc.autoReel} m/秒` : '自動收繩：關';
     document.getElementById('orbit-val').textContent = `繞圈半徑 ${this.pc.orbitRadius}m（巨人 ×${(this.cfg.hook.pull.orbitTitanFactor * 1).toFixed(2)}×體型）`;
+    document.getElementById('btn-lockcam').textContent = `鎖定鏡頭（勾住巨人時）：${this.lockCam ? '開' : '關'}`;
+    document.getElementById('btn-closecam').textContent = `近距離廣角鏡頭：${this.closeCam ? '開' : '關'}`;
+    document.getElementById('btn-camroll').textContent = `鏡頭側傾：${{ high: '強', low: '弱', off: '關' }[this.camRollLevel]}`;
     document.getElementById('btn-gyro').textContent = `陀螺儀瞄準：${{ high: '強', mid: '中', low: '弱', off: '關' }[this.gyroLevel]}`;
     document.getElementById('btn-joyturn').textContent = `空中左搖桿轉鏡頭：${{ high: '強', mid: '中', low: '弱', off: '關' }[this.joyTurnLevel]}`;
     document.getElementById('btn-lines').textContent = `速度線：${{ high: '高', mid: '中', low: '低', off: '關' }[this.speedLineLevel]}`;
@@ -822,6 +847,8 @@ export class Game {
     this.fx.burst(p, 1.0, '#ffd0a0', 0.2);
     this.fx.bladeHit(p, dir, false);
     this.fx.napeHit(p, dir, false);
+    titan.addWound(p, 0.9 * titan.scale);
+    this.rig.punch(p);
     this.audio.play('hitNape');
     this.hitStop = 0.08;
     this.slowMo = this.slowMoMax = 0.25;
@@ -840,6 +867,7 @@ export class Game {
       for (const s of t.spheres) {
         if (this.pc.pos.distanceTo(s.center) - s.r <= (rangeOverride ?? C.bodyRange)) {
           t.takeHit(C.bodyDamage, false);
+          t.addWound(_v.copy(this.pc.pos).lerp(s.center, 0.75), 0.7 * t.scale);
           this.audio.play('hitBody');
           this.fx.napeHit(_v.copy(this.pc.pos).lerp(s.center, 0.6), this.pc.vel.clone().normalize(), false);
           this.hud.toast('表皮傷害——瞄準後頸、眼睛或腳', '', 1.2);
@@ -866,6 +894,9 @@ export class Game {
     this.fx.burst(this.napePos, perfect ? 1.8 : 1.3, perfect ? '#ffb070' : '#ffd8b0', 0.24);
     this.fx.bladeHit(this.napePos, dir, perfect);
     this.fx.napeHit(this.napePos, dir, perfect);
+    titan.addWound(this.napePos, 1.3 * titan.scale);
+    this.rig.punch(this.napePos);
+    if (perfect) this.hud.killBurst(false);
     this.audio.play('hitNape');
     // 頓點 → 慢動作 → 恢復；鏡頭往前推並猛震
     this.hitStop = perfect ? C.hitStopPerfect : C.hitStop;
@@ -890,6 +921,8 @@ export class Game {
     }
     if (this.grab && this.grab.titan === titan) this._endGrab(true);
     this.audio.play('kill');
+    this.audio.play('killBoom');
+    this.hud.killBurst(true);
     this.hitStop = 0.2;
     this.slowMo = this.slowMoMax = 1.2;
     this.rig.startKillCam(titan, this.napePos);
@@ -940,6 +973,31 @@ export class Game {
     this.pc.invuln = Math.max(this.pc.invuln, 0.8);
   }
 
+  /** 高速貼地或貼牆時，刀尖刮出火花 */
+  _bladeSparks() {
+    const pc = this.pc;
+    if (pc.feelSpeed < 24 && !(pc.sliding && pc.speed > 8)) return;
+    const tip = this.model.bladeWorld('right', _v2, _bladeTip, true) || _bladeTip;
+    let hit = null;
+    if (pc.pos.y < 1.8 && (pc.sliding || !pc.grounded)) {
+      hit = _bladeTip.set(_bladeTip.x, 0.05, _bladeTip.z);
+    } else {
+      // 最近的牆面（建築方塊的水平距離）
+      for (const c of this.city.colliders) {
+        if (pc.pos.y > c.max.y + 0.5) continue;
+        const dx = Math.max(c.min.x - pc.pos.x, 0, pc.pos.x - c.max.x);
+        const dz = Math.max(c.min.z - pc.pos.z, 0, pc.pos.z - c.max.z);
+        if (Math.hypot(dx, dz) < 1.6) {
+          hit = _bladeTip.set(Math.min(c.max.x, Math.max(c.min.x, pc.pos.x)), pc.pos.y, Math.min(c.max.z, Math.max(c.min.z, pc.pos.z)));
+          break;
+        }
+      }
+    }
+    if (!hit) return;
+    this.fx.sparks(hit, pc.vel, pc.feelSpeed > 40 ? 8 : 4);
+    if (Math.random() < 0.25) this.audio.play('scrape');
+  }
+
   /** 色差（紅藍錯位）：命中與衝刺斬的瞬間 */
   _updateChroma(dt) {
     if (this.pc.lunge || this.pc.levi?.phase === 'dash') this.chroma = Math.max(this.chroma, 0.4);
@@ -975,7 +1033,7 @@ export class Game {
       // 陀螺儀：轉動手機＝轉動鏡頭（暫停時丟掉累積量，回到遊戲不會突然轉一大圈）
       if (this.gyro.enabled) {
         const gy = this.gyro.take();
-        const k = this.cfg.camera.gyro.levels[this.gyroLevel] ?? 0;
+        const k = this.rig.locked ? 0 : (this.cfg.camera.gyro.levels[this.gyroLevel] ?? 0); // 鎖定鏡頭時先停用
         if (this.state === 'playing' && k > 0 && (gy.yaw || gy.pitch)) {
           this.rig.yaw += gy.yaw * k;
           this.rig.pitch = Math.max(-1.35, Math.min(1.25, this.rig.pitch + gy.pitch * k));
@@ -1093,13 +1151,28 @@ export class Game {
       if (pc.pos.y > titan.height * 0.9) low *= 0.3; // 在巨人頭上時不仰拍
     }
     this.lowAngle += (low - (this.lowAngle || 0)) * Math.min(1, dt * 2);
+    // 鎖定鏡頭：勾在巨人身上 → 鏡頭對準牠；手動轉鏡頭持續一段時間＝解除（直到下次勾住）
+    const lockTitan = this.lockCam ? this._hookedTitan() : null;
+    const manualTurning = (this.touch && (t.turnX || t.turnY)) || (!this.touch && intent.manualLook && Math.hypot(intent.lookDX, intent.lookDY) > 0.004);
+    this.manualTurnTime = manualTurning ? (this.manualTurnTime || 0) + rdt : 0;
+    if (!lockTitan) this.lockBroken = false;
+    else if (this.manualTurnTime > C.lock.breakAfter) this.lockBroken = true;
+    let lockTarget = null;
+    if (lockTitan && lockTitan.alive && !this.lockBroken && !pc.levi) {
+      lockTarget = lockTitan.napeWorld(_aimLock);
+      lockTarget.y -= C.lock.aimDrop * lockTitan.scale;
+    }
+    document.body.classList.toggle('cam-locked', !!lockTarget);
     this.rig.update(dt, pc, {
       touch: this.touch,
       joyX: intent.move.x,
-      joyTurn: this.cfg.camera.joyTurn.levels[this.joyTurnLevel] ?? 1,
+      joyTurn: lockTarget ? 0 : (this.cfg.camera.joyTurn.levels[this.joyTurnLevel] ?? 1), // 鎖定時左搖桿＝繞圈，不轉鏡頭
       autoFollow: this.cameraFollow,
       followYaw: hookFollow ? this.model.yaw : null,
       lowAngle: this.lowAngle,
+      lockTarget,
+      rollLevel: this.cfg.camera.roll.levels[this.camRollLevel] ?? 0,
+      closeCam: this.closeCam,
       close: !!(pc.lunge || pc.levi || pc.dashGlow > 0.35), // 衝刺時鏡頭拉近（放開後跟著速度感慢慢退）
       realDt: this.realDt,
     });
@@ -1116,7 +1189,20 @@ export class Game {
 
     // 特效
     this.fx.update(dt, pc, this.model, this.camera);
-    if (pc.boosting || pc.dashing || pc.groundDashing) this.fx.gasPuff(pc.pos, pc.vel, true);
+    // 瓦斯雲軌跡：勾住飛行、噴氣、衝刺時身後拖出白色瓦斯（衝刺最濃）
+    const flying = !pc.grounded && pc.feelSpeed > 14;
+    if (pc.dashing || pc.levi?.phase === 'dash') this.fx.gasTrail(pc.pos, pc.vel, 1);
+    else if (pc.groundDashing) this.fx.gasTrail(pc.pos, pc.vel, 0.45);
+    else if (pc.boosting || (flying && pc.anyAttached)) this.fx.gasTrail(pc.pos, pc.vel, 0.55);
+    else if (flying && pc.feelSpeed > 30) this.fx.gasTrail(pc.pos, pc.vel, 0.2);
+    // 刀刃擦地／擦牆火花
+    this._bladeSparks();
+    // 風壓漩渦：高速繞圈（側向加速度大）、衝刺、兵長斬、迴旋斬
+    const lat = Math.hypot(pc.accel.x, pc.accel.z);
+    let swirl = flying ? Math.min(1, Math.max(0, (pc.feelSpeed - 35) / 40) * Math.min(1, lat / 25)) : 0;
+    if (pc.dashing) swirl = Math.max(swirl, 0.4 * pc.dashRamp);
+    if (pc.levi || this.model.spinTimer > 0) swirl = 1;
+    this.fx.updateSwirl(dt, pc.pos, pc.vel, swirl);
     if (pc.lunge) this.fx.trail(pc.pos);
     if (pc.levi) this.fx.leviTrail(pc.pos, pc.levi.phase === 'dash');
     this.model.setLevi(pc.levi ? (pc.levi.phase === 'dash' ? 2 : 1) : 0, pc.vel);
@@ -1132,6 +1218,8 @@ export class Game {
         }
       } else {
         if (t.hp < this.cfg.titan.hp && Math.random() < 0.2) this.fx.steam(t.napeWorld(_v), 1);
+        // 傷口冒蒸氣
+        for (const w of t.wounds) if (Math.random() < 0.12) this.fx.steam(w.mesh.getWorldPosition(_v), 1);
         if (t.stunTimer > 0 && Math.random() < 0.4) this.fx.steam(t.eyeWorld(0, _v), 1);
       }
     }
@@ -1225,6 +1313,7 @@ export class Game {
         this.audio.play('hookFire');
         break;
       case 'hookAttach':
+        this.lockBroken = false; // 重新勾住＝重新鎖定
         this._missionEvent('hook');
         this.audio.play('hookAttach');
         this.fx.hookHit(e.point);
