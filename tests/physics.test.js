@@ -465,3 +465,22 @@ test('hooked + stick sideways: circles around the anchor (perpendicular to the r
   assert.ok(Math.abs(swept) > 1.0, `orbited ${((Math.abs(swept) * 180) / Math.PI).toFixed(0)}° around the anchor`);
   assert.ok(p.pos.distanceTo(A) < d0, 'and spiralled inward (auto-reel)');
 });
+
+test('double-tap dash while hooked (tight rope) is just a dash along the rope, never a sideways flip', () => {
+  const p = new PlayerController(CONFIG);
+  p.speedScale = CONFIG.player.defaultSpeedScale;
+  p.pos.set(0, 10, 3);
+  const A = new Vector3(0, 45, 0);
+  p.fireHook('right', p.pos.clone(), anchorAt(0, 45, 0));
+  for (let i = 0; i < 40 && !p.hooks.right.attached; i++) p.update(1 / 60, idle(), world());
+  let flipped = false, maxHoriz = 0;
+  for (let i = 0; i < 60; i++) {
+    const tap = i === 0 || i === 6 || i === 12;
+    p.update(1 / 60, { ...idle(), boost: i < 60, boostPressed: tap }, world());
+    if (p.flip) flipped = true;
+    maxHoriz = Math.max(maxHoriz, Math.hypot(p.pos.x, p.pos.z - 3));
+  }
+  assert.ok(!flipped, 'no flip while the rope is tight');
+  assert.ok(p.pos.y > 25, `went up the rope (y ${p.pos.y.toFixed(1)})`);
+  assert.ok(maxHoriz < 8, `no horizontal burst (${maxHoriz.toFixed(1)}m)`);
+});

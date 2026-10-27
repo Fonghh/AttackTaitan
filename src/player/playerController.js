@@ -314,7 +314,9 @@ export class PlayerController {
     // 翻轉衝刺：空中連點兩下衝刺
     this.clock += dt;
     if (this.flipCool > 0) this.flipCool -= dt;
-    if (intent.boostPressed && !this.grounded) {
+    // 勾住（鋼索繃緊）時連點只是衝刺，不翻轉：翻轉只在自由飛行或鋼索放鬆時
+    const tightRope = (this.hooks.left.attached && !this.hooks.left.slack) || (this.hooks.right.attached && !this.hooks.right.slack);
+    if (intent.boostPressed && !this.grounded && !tightRope) {
       const F = cfg.dash.flip;
       if (this.clock - this.lastBoostPress < F.window && !this.busy && this.flipCool <= 0 && this.gas >= F.gas) {
         this._startFlip(world);
