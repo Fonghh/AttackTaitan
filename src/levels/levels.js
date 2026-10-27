@@ -119,6 +119,9 @@ export function evaluateStars(level, r) {
 
 const KEY = 'progress1';
 
+/** 測試期間：所有關卡一開始就解鎖（改成 false 恢復「過前一關才解鎖」） */
+export const UNLOCK_ALL = true;
+
 /** @param {Storage|null} storage */
 export function loadProgress(storage) {
   try {
@@ -140,8 +143,9 @@ export function saveResult(storage, id, stars, time) {
 }
 
 /** 第一關一定開；其他關要前一關至少拿到 1 顆星 */
-export function isUnlocked(progress, id) {
+export function isUnlocked(progress, id, unlockAll = UNLOCK_ALL) {
   const i = LEVELS.findIndex((l) => l.id === id);
-  if (i <= 0) return i === 0;
+  if (i < 0) return false;
+  if (unlockAll || i === 0) return true;
   return (progress[LEVELS[i - 1].id]?.stars || 0) > 0;
 }

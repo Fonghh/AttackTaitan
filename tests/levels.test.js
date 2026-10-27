@@ -27,11 +27,12 @@ test('levels: star rating by clear / time / no damage', () => {
 test('levels: progress keeps the best result and unlocks the next level', () => {
   const st = memStorage();
   let p = loadProgress(st);
-  assert.ok(isUnlocked(p, 'training'));
-  assert.ok(!isUnlocked(p, 'city'));
+  assert.ok(isUnlocked(p, 'training', false));
+  assert.ok(!isUnlocked(p, 'city', false));
+  assert.ok(isUnlocked(p, 'forest', true), 'UNLOCK_ALL opens every level');
   p = saveResult(st, 'training', 2, 120);
   p = saveResult(st, 'training', 1, 150); // 較差的成績不覆蓋
   assert.deepEqual(p.training, { stars: 2, time: 120 });
-  assert.ok(isUnlocked(loadProgress(st), 'city'));
-  assert.ok(!isUnlocked(loadProgress(st), 'rings'));
+  assert.ok(isUnlocked(loadProgress(st), 'city', false));
+  assert.ok(!isUnlocked(loadProgress(st), 'rings', false));
 });

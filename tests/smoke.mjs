@@ -43,7 +43,7 @@ try {
   const menu = await page.evaluate(() => {
     return [...document.querySelectorAll('#level-list .level-card')].map((b) => ({ name: b.querySelector('b').textContent, locked: b.disabled }));
   });
-  check('[levels] menu lists 4 levels, only the first is unlocked at the start', menu.length === 4 && !menu[0].locked && menu.slice(1).every((m) => m.locked), JSON.stringify(menu));
+  check('[levels] menu lists 4 levels, all unlocked', menu.length === 4 && menu.every((m) => !m.locked), JSON.stringify(menu));
   await page.goto(`${URL_BASE}?level=city`);
   await page.waitForFunction(() => window.__game, null, { timeout: 20000 });
   await page.waitForTimeout(800);
