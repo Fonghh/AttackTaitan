@@ -19,6 +19,10 @@ export class Hook {
     this.object = null; // 勾住的物件（可能會移動，例如巨人）
     this.local = new Vector3(); // 命中點在物件座標系中的位置
     this.length = 0;
+    this.reelRate = 0; // 自動收繩速度（拉索模式，每幀由玩家控制器設定）
+    this.orbitR = 0; // 繞圈半徑
+    this.floorR = 0; // 勾在巨人身上時，捲收不會短於繞圈半徑
+    this.slackPeak = this.slackStart = 0; // 衝刺放鬆後：飛到的最遠距離、抵達時的距離
     this.taut = false;
     this.attachTime = 0; // 勾住了多久
     this.pullOn = true; // 拉索模式：是否正在拉

@@ -333,3 +333,64 @@ test('Levi slash: brief hover, then spins straight along the rope to the anchor'
   assert.ok(p.pos.distanceTo(new Vector3(0, 40, 0)) < CONFIG.strike.leviHitDist + 2, `ends next to the anchor (${p.pos.distanceTo(new Vector3(0, 40, 0)).toFixed(1)}m)`);
   assert.ok(frames < 90, `fast dash (${frames} frames)`);
 });
+
+// 自動收繩：鏡頭朝向勾點（像瞄著目標時）
+const facing = (p, a) => {
+  const d = a.clone().sub(p.pos).setY(0).normalize();
+  return { ...world(), camYaw: Math.atan2(-d.x, -d.z), camForward: d };
+};
+const reelRun = (move, object) => {
+  const p = new PlayerController(CONFIG);
+  p.speedScale = CONFIG.player.defaultSpeedScale;
+  p.pos.set(0, 30, 50);
+  const A = new Vector3(0, 40, 0);
+  const aim = anchorAt(0, 40, 0);
+  if (object) aim.object = object;
+  p.fireHook('right', p.pos.clone(), aim);
+  for (let i = 0; i < 360; i++) p.update(1 / 60, { ...idle(), move }, facing(p, A));
+  return p;
+};
+
+test('auto-reel: rope shortens to the orbit radius with the stick neutral or pushed sideways', () => {
+  const R = CONFIG.hook.pull.orbitRadius;
+  const n = reelRun({ x: 0, y: 0 });
+  assert.ok(Math.abs(n.hooks.right.length - R) < 0.5, `neutral → ${n.hooks.right.length.toFixed(1)}m`);
+  const s = reelRun({ x: 1, y: 0 });
+  assert.ok(s.hooks.right.length < R + 1, `sideways spirals in → ${s.hooks.right.length.toFixed(1)}m`);
+});
+
+test('auto-reel: pushing away from the anchor holds the distance', () => {
+  const p = reelRun({ x: 0, y: -1 });
+  assert.ok(p.hooks.right.length > 45, `held at ${p.hooks.right.length.toFixed(1)}m`);
+});
+
+test('auto-reel: hooked on a titan orbits at a wider radius (× factor × titan size)', () => {
+  const o = new Object3D();
+  o.updateMatrixWorld();
+  o.userData.titan = { scale: 1.4 };
+  const p = reelRun({ x: 0, y: 0 }, o);
+  const want = CONFIG.hook.pull.orbitRadius * CONFIG.hook.pull.orbitTitanFactor * 1.4;
+  assert.ok(Math.abs(p.hooks.right.length - want) < 1.2, `${p.hooks.right.length.toFixed(1)}m vs ${want.toFixed(1)}m`);
+});
+
+test('after a dash the slack rope takes up as you fall back (no huge swing radius)', () => {
+  const p = new PlayerController(CONFIG);
+  p.speedScale = CONFIG.player.defaultSpeedScale;
+  p.pos.set(0, 30, 70);
+  p.vel.set(8, 0, 0);
+  const A = new Vector3(0, 45, 0);
+  p.fireHook('right', p.pos.clone(), anchorAt(0, 45, 0));
+  let arrived = false, maxExcess = 0;
+  for (let i = 0; i < 360; i++) {
+    const b = i >= 10 && i < 190;
+    p.update(1 / 60, { ...idle(), boost: b, boostPressed: i === 10 }, world());
+    const justArrived = p.events.some((e) => e.type === 'dashArrive');
+    if (justArrived) arrived = true;
+    p.events.length = 0;
+    const h = p.hooks.right;
+    if (arrived && !justArrived && h.attached && p.vel.dot(p.pos.clone().sub(A)) < 0) maxExcess = Math.max(maxExcess, h.length - p.pos.distanceTo(A));
+  }
+  assert.ok(arrived, 'dash reached the anchor');
+  assert.ok(maxExcess <= CONFIG.dash.slackTakeUp + 0.5, `falling back: rope at most ${maxExcess.toFixed(1)}m longer than the distance`);
+  assert.ok(p.hooks.right.length < 25, `final rope ${p.hooks.right.length.toFixed(1)}m (was ~59m before)`);
+});

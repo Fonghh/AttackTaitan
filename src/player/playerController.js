@@ -27,6 +27,8 @@ export class PlayerController {
     this.speedScale = 1; // 速度倍率（暫停選單調整）：影響拉索、加速與最高速度
     this.dashScale = cfg.dash.defaultScale; // 衝刺倍率（暫停選單調整）
     this.steerScale = cfg.hook.pull.defaultSteerScale; // 左右擺盪倍率（暫停選單調整）
+    this.autoReel = cfg.hook.pull.autoReel; // 自動收繩速度 m/s（暫停選單調整）
+    this.orbitRadius = cfg.hook.pull.orbitRadius; // 繞圈半徑 m（暫停選單調整）
     this.grabbedBy = null; // 被哪隻巨人抓住
     this.reset();
   }
@@ -216,17 +218,40 @@ export class PlayerController {
     // 拉索模式：勾住就一直被拉；擺盪模式：只有 Space 捲收
     // 拉索靠近勾點後停止拉動（鋼索不斷，改成繞勾點擺盪），拉遠了再恢復
     if (attached && this.ropeStyle === 'pull') {
-      const A = cfg.hook.pull.arriveDist;
+      const PL = cfg.hook.pull;
+      const A = PL.arriveDist;
       for (const side of ['left', 'right']) {
         const hk = this.hooks[side];
         if (!hk.attached) continue;
         const d = this.pos.distanceTo(hk.anchor(_anchor));
-        const passed = d < A * 2.5 && this.vel.dot(_tmp.subVectors(_anchor, this.pos)) < 0; // 已經衝過勾點
-        if (hk.pullOn && (d < A || passed)) {
+        const R = this.orbitRadiusFor(hk);
+        // 放鬆的鋼索（衝刺抵達後）：往上衝時不扯住，往回掉時跟著收，重新繃緊就恢復自動收繩
+        if (hk.slack) {
+          // 只在真的衝過頭（比抵達時遠 6m 以上）、飛過最遠點開始往下掉之後才收；
+          // 往外衝、往上飛、在屋頂邊緣碰撞時不收，保留衝過頭的感覺
+          hk.slackPeak = Math.max(hk.slackPeak || 0, d);
+          if (hk.slackPeak > (hk.slackStart || 0) + 6 && d < hk.slackPeak - 1.5 && this.vel.y < 0) hk.length = Math.min(hk.length, d + D.slackTakeUp);
+          if (d >= hk.length - 0.05 && !dashing) hk.slack = false;
+        }
+        // 建築：照舊在 6m 停止拉動（方便翻上屋頂）；巨人：停在繞圈半徑，繞著巨人轉
+        const onTitan = !!hk.object?.userData?.titan;
+        const arriveAt = dashing || !onTitan ? A : Math.max(A, R);
+        hk.floorR = onTitan && !dashing ? R : 0;
+        const passed = d < Math.max(A * 2.5, R * 1.5) && this.vel.dot(_tmp.subVectors(_anchor, this.pos)) < 0; // 已經衝過勾點
+        if (hk.pullOn && (d < arriveAt || passed)) {
           hk.pullOn = false;
           if (dashing) this._dashArrive(hk, d);
           else this.emit('arrive', { side });
-        } else if (!hk.pullOn && !hk.slack && d > A * 3) hk.pullOn = true;
+        } else if (!hk.pullOn && !hk.slack && d > Math.max(A * 3, R * 2)) hk.pullOn = true;
+        // 自動收繩：固定速度收到繞圈半徑；搖桿往遠離勾點推＝暫停（實際收短在物理子步驟裡做，比較平順）
+        hk.reelRate = 0;
+        hk.orbitR = R;
+        if (!hk.slack && !dashing && !this.busy && hk.length > R && this.autoReel > 0) {
+          _tmp.subVectors(_anchor, this.pos).setY(0);
+          const away = _tmp.lengthSq() > 1e-4 ? _wish.dot(_tmp.normalize()) : 0;
+          this.reelHold = away < PL.holdDot;
+          if (!this.reelHold) hk.reelRate = this.autoReel;
+        }
       }
     }
     const pulling = attached && this.ropeStyle === 'pull' && !this.busy && (this.hooks.left.pullOn || this.hooks.right.pullOn);
@@ -336,7 +361,11 @@ export class PlayerController {
             if (it === 0 && this.reeling > 0 && !hk.slack) {
               // 捲收時繩長跟著實際距離縮短（不會反過來把角色硬拉過去）
               const dist = this.pos.distanceTo(_anchor);
-              hk.length = Math.max(cfg.hook.minLength, Math.min(hk.length, dist));
+              hk.length = Math.max(cfg.hook.minLength, hk.floorR || 0, Math.min(hk.length, dist));
+            }
+            if (it === 0 && hk.reelRate > 0 && hk.length > hk.orbitR) {
+              // 自動收繩（拉索模式）：每個子步驟收一點，收到繞圈半徑為止
+              hk.length = Math.max(hk.orbitR, Math.min(hk.length, this.pos.distanceTo(_anchor)) - hk.reelRate * h);
             }
             const r = applyRopeConstraint(this.pos, this.vel, _anchor, hk.length, cfg.hook.maxCorrection);
             hk.taut = r.taut;
@@ -514,11 +543,18 @@ export class PlayerController {
     }
   }
 
+  /** 這條鋼索的繞圈半徑：建築＝設定值；巨人＝設定值 × 倍率 × 體型 */
+  orbitRadiusFor(hk) {
+    const t = hk.object?.userData?.titan;
+    return t ? this.orbitRadius * this.cfg.hook.pull.orbitTitanFactor * (t.scale || 1) : this.orbitRadius;
+  }
+
   /** 衝刺到勾點：鋼索放鬆（不斷），向上加成，帶著速度衝過頭往上飛 */
   _dashArrive(hk, d) {
     const D = this.cfg.dash;
     hk.slack = true;
     hk.length = d + D.slackExtra;
+    hk.slackPeak = hk.slackStart = d;
     if (this.vel.y > 0) this.vel.y = this.vel.y * (1 + D.launchBonus) + D.launchUp * Math.max(0.3, this.dashScale);
     // 撞牆損失的水平速度一樣在翻過牆頂後歸還
     if (this.wallCarryTimer > 0) {

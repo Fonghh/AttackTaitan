@@ -118,6 +118,12 @@ export class Game {
     if (!(this.speedLineLevel in cfg.speedLines.levels)) this.speedLineLevel = cfg.speedLines.defaultLevel;
     this.fx.speedLines.level = cfg.speedLines.levels[this.speedLineLevel];
     this.pc.steerScale = Math.max(0.5, Math.min(3, Number(this._load('steerScale2', String(cfg.hook.pull.defaultSteerScale))) || cfg.hook.pull.defaultSteerScale));
+    const num = (key, def, lo, hi) => {
+      const v = Number(this._load(key, String(def)));
+      return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : def;
+    };
+    this.pc.autoReel = num('autoReel', cfg.hook.pull.autoReel, 0, 20);
+    this.pc.orbitRadius = num('orbitRadius', cfg.hook.pull.orbitRadius, 4, 20);
     this.pc.speedScale = Math.max(0.1, Math.min(1.5, Number(this._load('speedScale2', String(cfg.player.defaultSpeedScale))) || cfg.player.defaultSpeedScale));
     this.touchUI.setMode(this.hookMode);
 
@@ -224,6 +230,20 @@ export class Game {
       this._save('speedLines', this.speedLineLevel);
       this._syncModeLabel();
     });
+    const setReel = (d) => {
+      this.pc.autoReel = Math.max(0, Math.min(20, this.pc.autoReel + d));
+      this._save('autoReel', String(this.pc.autoReel));
+      this._syncModeLabel();
+    };
+    const setOrbit = (d) => {
+      this.pc.orbitRadius = Math.max(4, Math.min(20, this.pc.orbitRadius + d));
+      this._save('orbitRadius', String(this.pc.orbitRadius));
+      this._syncModeLabel();
+    };
+    $('reel-down').addEventListener('click', () => setReel(-1));
+    $('reel-up').addEventListener('click', () => setReel(1));
+    $('orbit-down').addEventListener('click', () => setOrbit(-1));
+    $('orbit-up').addEventListener('click', () => setOrbit(1));
     $('steer-down').addEventListener('click', () => setSteer(-0.1));
     $('steer-up').addEventListener('click', () => setSteer(0.1));
     $('dash-down').addEventListener('click', () => setDash(-0.1));
@@ -252,6 +272,8 @@ export class Game {
     document.getElementById('btn-hookfollow').textContent = this.hookFollow ? '鉤住時鏡頭跟隨人物：開' : '鉤住時鏡頭跟隨人物：關';
     document.getElementById('spd-val').textContent = `速度 ${Math.round(this.pc.speedScale * 100)}%`;
     document.getElementById('dash-val').textContent = `衝刺 ${Math.round(this.pc.dashScale * 100)}%（${Math.round(this.cfg.dash.speed * this.pc.dashScale)} m/s）`;
+    document.getElementById('reel-val').textContent = this.pc.autoReel > 0 ? `自動收繩 ${this.pc.autoReel} m/秒` : '自動收繩：關';
+    document.getElementById('orbit-val').textContent = `繞圈半徑 ${this.pc.orbitRadius}m（巨人 ×${(this.cfg.hook.pull.orbitTitanFactor * 1).toFixed(2)}×體型）`;
     document.getElementById('btn-gyro').textContent = `陀螺儀瞄準：${{ high: '強', mid: '中', low: '弱', off: '關' }[this.gyroLevel]}`;
     document.getElementById('btn-joyturn').textContent = `空中左搖桿轉鏡頭：${{ high: '強', mid: '中', low: '弱', off: '關' }[this.joyTurnLevel]}`;
     document.getElementById('btn-lines').textContent = `速度線：${{ high: '高', mid: '中', low: '低', off: '關' }[this.speedLineLevel]}`;
