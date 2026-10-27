@@ -314,12 +314,10 @@ export class PlayerController {
     // 翻轉衝刺：空中連點兩下衝刺
     this.clock += dt;
     if (this.flipCool > 0) this.flipCool -= dt;
-    // 勾住（鋼索繃緊）時連點只是衝刺，不翻轉：翻轉只在自由飛行或鋼索放鬆時
-    const tightRope = (this.hooks.left.attached && !this.hooks.left.slack) || (this.hooks.right.attached && !this.hooks.right.slack);
-    if (intent.boostPressed && !this.grounded && !tightRope) {
+    if (intent.boostPressed && !this.grounded) {
       const F = cfg.dash.flip;
       if (this.clock - this.lastBoostPress < F.window && !this.busy && this.flipCool <= 0 && this.gas >= F.gas) {
-        this._startFlip(world);
+        this._startFlip(world, intent);
         this.lastBoostPress = -9;
       } else this.lastBoostPress = this.clock;
     }
@@ -554,13 +552,29 @@ export class PlayerController {
   }
 
   /** 翻轉衝刺開始：方向＝搖桿（沒推就鏡頭前方），勾著的鋼索先放鬆（不會被扯住） */
-  _startFlip(world) {
+  _startFlip(world, intent) {
     const F = this.cfg.dash.flip;
     const dir = new Vector3();
-    if (_wish.lengthSq() > 0.04) dir.copy(_wish).normalize();
-    else dir.copy(world.camForward);
-    dir.y = Math.max(-0.3, dir.y) + 0.12; // 微微往上，比較不會撞地
-    dir.normalize();
+    // 勾住（鋼索繃緊）時：以繩子為準——前＝沿繩子朝勾點、左右＝繞著勾點、後＝遠離；沒推搖桿＝沿繩子衝
+    let rope = null;
+    for (const side of ['left', 'right']) {
+      const hk = this.hooks[side];
+      if (hk.attached && !hk.slack) rope = hk;
+    }
+    if (rope) {
+      rope.anchor(_ropeDir).sub(this.pos).normalize();
+      const mx = intent.move.x, my = intent.move.y;
+      if (mx * mx + my * my > 0.04) {
+        _steer.copy(_right).addScaledVector(_ropeDir, -_right.dot(_ropeDir));
+        if (_steer.lengthSq() > 1e-4) _steer.normalize();
+        dir.copy(_ropeDir).multiplyScalar(my).addScaledVector(_steer, mx).normalize();
+      } else dir.copy(_ropeDir);
+    } else {
+      if (_wish.lengthSq() > 0.04) dir.copy(_wish).normalize();
+      else dir.copy(world.camForward);
+      dir.y = Math.max(-0.3, dir.y) + 0.12; // 微微往上，比較不會撞地
+      dir.normalize();
+    }
     for (const side of ['left', 'right']) {
       const hk = this.hooks[side];
       if (!hk.attached) continue;

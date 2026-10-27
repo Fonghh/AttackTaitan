@@ -82,7 +82,8 @@ export class Game {
     this.model = new PlayerModel(this.scene);
     this.titans = L.titans.map((sp) => new Titan(this.scene, cfg, sp));
     this.titan = this.titans[0] || NO_TITAN; // 目前的目標巨人（離玩家最近、活著的）
-    this.mission = new Mission(L, this.scene);
+    this.mission = new Mission(L, this.scene, this.touch);
+    document.body.classList.toggle('tutorial', L.objective === 'tutorial');
     document.body.classList.toggle('no-titans', this.titans.length === 0);
     this.titanRoots = this.titans.map((t) => t.root);
     this.titanSpheres = this.titans.flatMap((t) => t.spheres);
@@ -338,6 +339,7 @@ export class Game {
 
   showPanel(id) {
     for (const p of document.querySelectorAll('.panel')) p.hidden = p.id !== id;
+    document.body.classList.toggle('panel-open', !!id);
     document.getElementById('hud').classList.toggle('dim', !!id);
   }
 
@@ -362,7 +364,7 @@ export class Game {
     this.showPanel(null);
     this.touchUI.show(this.touch);
     this._save('lastLevel', this.level.id);
-    const hint = { training: '照畫面上方的提示一步一步練習', rings: '跟著黃色圓圈與箭頭，依序穿過光圈！', kill: '從高處躍下，用鋼索擺盪接近巨人！' };
+    const hint = { tutorial: '照畫面上方的提示操作，閃爍的按鈕就是現在要用的', training: '照畫面上方的提示一步一步練習', rings: '跟著黃色圓圈與箭頭，依序穿過光圈！', kill: '從高處躍下，用鋼索擺盪接近巨人！' };
     this.hud.toast(hint[this.level.objective === 'kill' ? 'kill' : this.level.objective], '', 2.5);
   }
 
@@ -373,6 +375,7 @@ export class Game {
     this.state = 'playing';
     this.showPanel(null);
     this.touchUI.show(this.touch);
+    this._missionEvent('pause'); // 教學：看過暫停選單、按「繼續」回來
   }
 
   pause() {
@@ -407,7 +410,9 @@ export class Game {
     this.flickTurn = null;
     this.passThrough = 0;
     this.strikeHold = null;
+    this.tut = null;
     this._updateMission();
+    this._tutorialHighlight();
     if (play) {
       this.state = 'playing';
       this.input.enabled = true;
@@ -469,6 +474,32 @@ export class Game {
       this.audio.play('ready');
     }
     this._updateMission();
+    this._tutorialHighlight();
+  }
+
+  /** 操作教學：閃爍提示目前要用的按鈕／搖桿區 */
+  _tutorialHighlight() {
+    const cur = this.mission.current;
+    for (const el of document.querySelectorAll('.tut-hl')) el.classList.remove('tut-hl');
+    document.body.classList.toggle('tut-joy', !!(cur && cur.hl === 'joy' && this.touch));
+    document.body.classList.toggle('tut-look', !!(cur && cur.hl === 'look' && this.touch));
+    if (cur && cur.hl && cur.hl.startsWith('.')) for (const el of document.querySelectorAll(cur.hl)) el.classList.add('tut-hl');
+  }
+
+  /** 操作教學：持續動作的判定（走一段路、轉視角、勾住時推搖桿） */
+  _tutorialTick(dt, intent) {
+    const cur = this.mission.current;
+    if (!cur || this.state !== 'playing') return;
+    const pc = this.pc;
+    const T = (this.tut = this.tut || { move: 0, look: 0, fwd: 0, side: 0 });
+    if (cur.id === 'move' && pc.grounded && Math.hypot(pc.vel.x, pc.vel.z) > 2) T.move += Math.hypot(pc.vel.x, pc.vel.z) * dt;
+    if (cur.id === 'look') T.look += Math.abs(intent.lookDX || 0) + (this.touch ? Math.abs(this.input.touch.turnX) * this.cfg.reticle.maxTurnRate * dt : 0);
+    if (cur.id === 'ropeFwd' && pc.anyAttached && intent.move.y > 0.6) T.fwd += dt;
+    if (cur.id === 'ropeSide' && pc.anyAttached && Math.abs(intent.move.x) > 0.6) T.side += dt;
+    if (T.move > 12) this._missionEvent('move');
+    if (T.look > 1.2) this._missionEvent('look');
+    if (T.fwd > 0.6) this._missionEvent('ropeFwd');
+    if (T.side > 0.8) this._missionEvent('ropeSide');
   }
 
   resize() {
@@ -505,6 +536,7 @@ export class Game {
     }
     const side = key === 'auto' ? this.autoSide : key;
     pc.fireHook(side, this._launcherPos(side), aim);
+    if (!this.touch) this._missionEvent('aimFire'); // 電腦：瞄準後點左鍵發射＝教學的「瞄準發射」
   }
 
   /** 準心搖桿放開：朝準心發射；已勾住時直接換到新的勾點 */
@@ -522,6 +554,7 @@ export class Game {
       if (pc.hooks[other].active) pc.hooks[other].release(); // 換勾點：舊的直接收回，不觸發放索加成
     }
     pc.fireHook(side, this._launcherPos(side), aim);
+    this._missionEvent('aimFire');
   }
 
   _handleEvent(ev) {
@@ -623,6 +656,7 @@ export class Game {
 
   _strike() {
     if (this.strikeCooldown > 0 || this.pc.lunge) return;
+    this._missionEvent('strike');
     this.strikeCooldown = this.cfg.strike.cooldown;
     this.stats.strikes++;
     this.audio.play('slash');
@@ -1279,6 +1313,8 @@ export class Game {
 
     // 勝負
     if (this.state === 'playing') {
+      // 操作教學的持續動作判定
+      if (this.mission.type === 'tutorial') this._tutorialTick(dt, intent);
       // 光圈競速：通過判定
       const ring = this.mission.update(pc.pos);
       if (ring) {
@@ -1362,6 +1398,7 @@ export class Game {
         this.hud.hookStatus('沒勾到', 'fail');
         break;
       case 'hookRelease':
+        this._missionEvent('release');
         this.audio.play('hookRelease');
         break;
       case 'land':
@@ -1378,9 +1415,11 @@ export class Game {
         }
         break;
       case 'dash':
+        this._missionEvent('dashHold');
         this.audio.play('boost');
         break;
       case 'flip':
+        this._missionEvent('flip');
         this.audio.play('boost');
         this.audio.play('swing');
         this.rig.kick(10);
@@ -1392,6 +1431,7 @@ export class Game {
         this.fx.gasPuff(this.pc.pos, this.pc.vel, true);
         break;
       case 'groundDash':
+        this._missionEvent('groundDash');
         this.audio.play('boost');
         this.passThrough = Math.max(this.passThrough, this.cfg.dash.groundTime);
         this.fx.dust(this.pc.pos, this.pc.vel, 10);

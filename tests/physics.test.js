@@ -466,21 +466,38 @@ test('hooked + stick sideways: circles around the anchor (perpendicular to the r
   assert.ok(p.pos.distanceTo(A) < d0, 'and spiralled inward (auto-reel)');
 });
 
-test('double-tap dash while hooked (tight rope) is just a dash along the rope, never a sideways flip', () => {
+test('double-tap dash while hooked: flips along the rope when the stick is centered (not toward the camera)', () => {
   const p = new PlayerController(CONFIG);
   p.speedScale = CONFIG.player.defaultSpeedScale;
   p.pos.set(0, 10, 3);
-  const A = new Vector3(0, 45, 0);
   p.fireHook('right', p.pos.clone(), anchorAt(0, 45, 0));
   for (let i = 0; i < 40 && !p.hooks.right.attached; i++) p.update(1 / 60, idle(), world());
   let flipped = false, maxHoriz = 0;
   for (let i = 0; i < 60; i++) {
-    const tap = i === 0 || i === 6 || i === 12;
-    p.update(1 / 60, { ...idle(), boost: i < 60, boostPressed: tap }, world());
+    const tap = i === 0 || i === 6;
+    p.update(1 / 60, { ...idle(), boost: true, boostPressed: tap }, world());
     if (p.flip) flipped = true;
     maxHoriz = Math.max(maxHoriz, Math.hypot(p.pos.x, p.pos.z - 3));
   }
-  assert.ok(!flipped, 'no flip while the rope is tight');
-  assert.ok(p.pos.y > 25, `went up the rope (y ${p.pos.y.toFixed(1)})`);
+  assert.ok(flipped, 'flip happens while hooked');
+  assert.ok(p.pos.y > 25, `went up along the rope (y ${p.pos.y.toFixed(1)})`);
   assert.ok(maxHoriz < 8, `no horizontal burst (${maxHoriz.toFixed(1)}m)`);
+});
+
+test('double-tap dash while hooked + stick sideways: flips around the anchor (perpendicular to the rope)', () => {
+  const p = new PlayerController(CONFIG);
+  p.speedScale = CONFIG.player.defaultSpeedScale;
+  p.pos.set(0, 30, 30);
+  const A = new Vector3(0, 40, 0);
+  p.fireHook('right', p.pos.clone(), anchorAt(0, 40, 0));
+  for (let i = 0; i < 40 && !p.hooks.right.attached; i++) p.update(1 / 60, idle(), facing(p, A));
+  let dir = null;
+  for (let i = 0; i < 12; i++) {
+    const tap = i === 0 || i === 6;
+    p.update(1 / 60, { ...idle(), move: { x: 1, y: 0 }, boost: tap, boostPressed: tap }, facing(p, A));
+    if (p.flip && !dir) dir = p.flip.dir.clone();
+  }
+  assert.ok(dir, 'flipped');
+  const toA = A.clone().sub(p.pos).normalize();
+  assert.ok(Math.abs(dir.dot(toA)) < 0.4, `sideways relative to the rope (dot ${dir.dot(toA).toFixed(2)})`);
 });

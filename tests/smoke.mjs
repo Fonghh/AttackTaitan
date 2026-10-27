@@ -43,7 +43,7 @@ try {
   const menu = await page.evaluate(() => {
     return [...document.querySelectorAll('#level-list .level-card')].map((b) => ({ name: b.querySelector('b').textContent, locked: b.disabled }));
   });
-  check('[levels] menu lists 4 levels, all unlocked', menu.length === 4 && menu.every((m) => !m.locked), JSON.stringify(menu));
+  check('[levels] menu lists 5 levels (controls tutorial first), all unlocked', menu.length === 5 && menu[0].name === '操作教學' && menu.every((m) => !m.locked), JSON.stringify(menu));
   await page.goto(`${URL_BASE}?level=city`);
   await page.waitForFunction(() => window.__game, null, { timeout: 20000 });
   await page.waitForTimeout(800);
@@ -635,6 +635,24 @@ try {
     await page.click('#btn-start');
     return page.evaluate(fn);
   };
+  const tutorial = await levelRun('controls', () => {
+    const g = window.__game;
+    g.renderer.setAnimationLoop(null);
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    const first = g.hud.el.mission.textContent;
+    // 走一段路（持續動作判定）
+    g.pc.pos.set(12, 0.6, 30); // 柱子圈內的空地
+    g.pc.vel.set(0, 0, 0);
+    for (let i = 0; i < 140; i++) g.step(1 / 60, { ...base(), move: { x: 0, y: 1 } });
+    const afterMove = g.mission.current?.id;
+    // 轉視角（持續動作判定）
+    for (let i = 0; i < 30; i++) g.step(1 / 60, { ...base(), lookDX: 0.06, manualLook: true });
+    const afterLook = g.mission.current?.id;
+    for (const s of ['hook', 'release', 'aimFire', 'ropeFwd', 'ropeSide', 'dashHold', 'flip', 'groundDash', 'strike', 'pause']) g._missionEvent(s);
+    for (let i = 0; i < 60; i++) g.step(1 / 60, base());
+    return { first, afterMove, afterLook, state: g.state, next: document.getElementById('btn-next').textContent };
+  });
+  check('[tutorial] controls tutorial: walking and looking are detected, steps go in order, finishing leads to the training ground', tutorial.first.startsWith('教學 1/12') && tutorial.afterMove === 'look' && tutorial.afterLook === 'hook' && tutorial.state === 'won' && tutorial.next.includes('訓練場'), JSON.stringify(tutorial));
   const training = await levelRun('training', () => {
     const g = window.__game;
     g.renderer.setAnimationLoop(null);

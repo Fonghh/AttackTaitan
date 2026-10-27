@@ -6,8 +6,9 @@ export class Mission {
    * @param {object} level 關卡定義（levels.js）
    * @param {THREE.Scene|null} scene 有場景時建立光圈模型
    */
-  constructor(level, scene) {
+  constructor(level, scene, touch = true) {
     this.level = level;
+    this.touch = touch;
     this.type = level.objective;
     this.rings = (level.rings || []).map(([x, y, z]) => new THREE.Vector3(x, y, z));
     this.ringRadius = level.ringRadius ?? 6;
@@ -40,6 +41,14 @@ export class Mission {
   /** 遊戲事件（hook / fling / dash / leg / nape / levi / kill），回傳要提示的文字或 null */
   event(type) {
     if (type === 'kill') this.kills++;
+    if (this.type === 'tutorial') {
+      // 操作教學：照順序一步一步來，只認目前這一步
+      const cur = this.current;
+      if (!cur || cur.id !== type) return null;
+      this.done.add(type);
+      const next = this.current;
+      return next ? '✓ 很好！下一步' : '✓ 操作教學完成！';
+    }
     if (this.type !== 'training') return null;
     const steps = this.level.steps;
     const step = steps.find((s) => s.id === type);
@@ -47,6 +56,11 @@ export class Mission {
     this.done.add(type);
     const left = steps.length - this.done.size;
     return left > 0 ? `✓ ${step.text.split('，')[0]}（還剩 ${left} 項）` : '✓ 訓練完成！';
+  }
+
+  /** 操作教學：目前這一步（全部完成＝null） */
+  get current() {
+    return this.type === 'tutorial' ? this.level.steps.find((s) => !this.done.has(s.id)) || null : null;
   }
 
   /** 每幀：光圈通過判定。回傳剛通過的光圈編號（從 1 開始）或 0 */
@@ -83,13 +97,18 @@ export class Mission {
 
   /** 任務完成？ */
   complete(titans) {
-    if (this.type === 'training') return this.done.size >= this.level.steps.length;
+    if (this.type === 'training' || this.type === 'tutorial') return this.done.size >= this.level.steps.length;
     if (this.type === 'rings') return this.ringIndex >= this.rings.length;
     return titans.length > 0 && titans.every((t) => t.state === 'dead');
   }
 
   /** HUD 上方的任務文字 */
   text(titans) {
+    if (this.type === 'tutorial') {
+      const steps = this.level.steps;
+      const cur = this.current;
+      return cur ? `教學 ${this.done.size + 1}/${steps.length}：${this.touch ? cur.text : cur.pc}` : '操作教學完成！';
+    }
     if (this.type === 'training') {
       const steps = this.level.steps;
       const cur = steps.find((s) => !this.done.has(s.id));

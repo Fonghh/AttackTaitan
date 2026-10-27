@@ -8,6 +8,32 @@ import { CONFIG } from '../config.js';
 
 export const LEVELS = [
   {
+    id: 'controls',
+    name: '操作教學',
+    map: 'training',
+    objective: 'tutorial',
+    brief: '一步一步認識操作：左右搖桿、鋼索、衝刺、斬擊與暫停選單。照畫面上方的提示做，閃爍的按鈕就是現在要用的。',
+    spawn: { x: 0, y: 21, z: 80 },
+    faceTo: { x: 0, z: 0 },
+    titans: [{ name: '木人', x: 0, z: 0, yaw: 0, scale: 1, dummy: true }],
+    // text＝手機、pc＝電腦；hl＝要閃爍提示的按鈕（手機）
+    steps: [
+      { id: 'move', text: '左下半部拖曳＝移動搖桿：走下高台、跑一段路', pc: 'W A S D＝移動：走下高台、跑一段路', hl: 'joy' },
+      { id: 'look', text: '右邊空白處拖曳＝轉動視角：左右看一圈', pc: '移動滑鼠＝轉動視角：左右看一圈', hl: 'look' },
+      { id: 'hook', text: '點一下「鋼索」＝朝準心發射，勾住柱子上方', pc: '準星對準柱子上方，點滑鼠左鍵勾住', hl: '.t-hook' },
+      { id: 'release', text: '勾住後再點一下「鋼索」＝放開（往上衝時放開會飛更高）', pc: '再點一下左鍵＝放開（往上衝時放開會飛更高）', hl: '.t-hook' },
+      { id: 'aimFire', text: '按住「鋼索」拖曳＝移動準心（拖遠一點鏡頭會跟著轉），放開＝朝準心發射', pc: '準星就在畫面中央：瞄準另一根柱子，點左鍵勾住', hl: '.t-hook' },
+      { id: 'ropeFwd', text: '勾住時左搖桿往前推＝沿著繩子捲向勾點', pc: '勾住時按住 W＝沿著繩子捲向勾點', hl: 'joy' },
+      { id: 'ropeSide', text: '勾住時左搖桿往左右推＝繞著勾點轉圈（往後拉＝停止收繩）', pc: '勾住時按住 A 或 D＝繞著勾點轉圈（S＝停止收繩）', hl: 'joy' },
+      { id: 'dashHold', text: '勾住時按住「衝刺」＝快速捲收，越按越快', pc: '勾住時按住 Shift＝快速捲收，越按越快', hl: '.t-boost' },
+      { id: 'flip', text: '在空中快速點兩下「衝刺」＝翻轉衝刺（勾住時沿搖桿方向，沒推就沿繩子）', pc: '在空中快速按兩下 Shift＝翻轉衝刺', hl: '.t-boost' },
+      { id: 'groundDash', text: '落地後按住「衝刺」＝壓低身體滑鏟，越按越快', pc: '落地後按住 Shift＝滑鏟，越按越快', hl: '.t-boost' },
+      { id: 'strike', text: '靠近木人點一下「斬擊」＝出刀（勾住時長按＝兵長斬，下一關訓練場會練）', pc: '靠近木人按 E 或 F＝出刀（勾住時長按＝兵長斬）', hl: '.t-strike' },
+      { id: 'pause', text: '點左上角「II」＝暫停：可以調靈敏度、鏡頭、速度等設定，看完按「繼續」', pc: '按 Esc＝暫停：可以調靈敏度、鏡頭、速度等設定，看完按「繼續」', hl: '.t-pause' },
+    ],
+    stars: [{ type: 'clear' }, { type: 'time', max: 240 }, { type: 'time', max: 150 }],
+  },
+  {
     id: 'training',
     name: '訓練場',
     map: 'training',
