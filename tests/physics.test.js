@@ -380,7 +380,7 @@ test('after a dash the slack rope takes up as you fall back (no huge swing radiu
   p.vel.set(8, 0, 0);
   const A = new Vector3(0, 45, 0);
   p.fireHook('right', p.pos.clone(), anchorAt(0, 45, 0));
-  let arrived = false, maxExcess = 0;
+  let arrived = false, maxExcess = 0, peak = 0;
   for (let i = 0; i < 360; i++) {
     const b = i >= 10 && i < 190;
     p.update(1 / 60, { ...idle(), boost: b, boostPressed: i === 10 }, world());
@@ -388,14 +388,17 @@ test('after a dash the slack rope takes up as you fall back (no huge swing radiu
     if (justArrived) arrived = true;
     p.events.length = 0;
     const h = p.hooks.right;
-    if (arrived && !justArrived && h.attached && p.vel.dot(p.pos.clone().sub(A)) < 0) maxExcess = Math.max(maxExcess, h.length - p.pos.distanceTo(A));
+    const dA = p.pos.distanceTo(A);
+    if (arrived) peak = Math.max(peak, dA);
+    // 飛過最遠點、開始往下掉、往勾點回來時：繩子最多只比距離長 slackTakeUp
+    if (arrived && !justArrived && h.attached && p.vel.y < 0 && dA < peak - 3 && p.vel.dot(p.pos.clone().sub(A)) < 0) maxExcess = Math.max(maxExcess, h.length - dA);
   }
   assert.ok(arrived, 'dash reached the anchor');
   assert.ok(maxExcess <= CONFIG.dash.slackTakeUp + 0.5, `falling back: rope at most ${maxExcess.toFixed(1)}m longer than the distance`);
   assert.ok(p.hooks.right.length < 25, `final rope ${p.hooks.right.length.toFixed(1)}m (was ~59m before)`);
 });
 
-test('flip dash: double-tap dash in the air bursts a fixed distance, then brakes and hangs (no overshoot)', () => {
+test('flip dash: double-tap dash in the air bursts, then keeps its momentum', () => {
   const p = new PlayerController(CONFIG);
   p.speedScale = CONFIG.player.defaultSpeedScale;
   p.pos.set(0, 40, 0);
@@ -410,11 +413,55 @@ test('flip dash: double-tap dash in the air bursts a fixed distance, then brakes
   }
   const dist = Math.hypot(p.pos.x - start.x, p.pos.z - start.z);
   assert.ok(flipped, 'second tap within the window starts the flip');
-  assert.ok(dist > 12 && dist < 30, `burst ${dist.toFixed(1)}m sideways`);
-  assert.ok(p.speed < maxSpeed * 0.6, `brakes after the burst (${p.speed.toFixed(1)} of ${maxSpeed.toFixed(1)} m/s)`);
+  assert.ok(dist > 12, `burst ${dist.toFixed(1)}m sideways`);
+  assert.ok(p.speed > maxSpeed * 0.8, `keeps momentum after the burst (${p.speed.toFixed(1)} of ${maxSpeed.toFixed(1)} m/s)`);
   // 一次單按不會翻轉
   const q = new PlayerController(CONFIG);
   q.pos.set(0, 40, 0);
   for (let i = 0; i < 20; i++) q.update(1 / 60, { ...idle(), boost: i === 0, boostPressed: i === 0 }, world());
   assert.ok(!q.flip && q.flipCool <= 0, 'single tap does not flip');
+});
+
+test('hooked + stick forward: reel straight along the rope to a high anchor, independent of the camera, no overshoot', () => {
+  const run = (move, camYaw) => {
+    const p = new PlayerController(CONFIG);
+    p.speedScale = CONFIG.player.defaultSpeedScale;
+    p.pos.set(0, 8, 60);
+    const A = new Vector3(0, 48, 0); // 像遠處巨人的頭
+    p.fireHook('right', p.pos.clone(), anchorAt(0, 48, 0));
+    const w = { ...world(), camYaw, camForward: new Vector3(-Math.sin(camYaw), 0, -Math.cos(camYaw)) };
+    let minD = 1e9, maxY = 0, maxX = 0;
+    for (let i = 0; i < 40 && !p.hooks.right.attached; i++) p.update(1 / 60, idle(), w); // 等鉤爪勾住
+    assert.ok(p.hooks.right.attached);
+    for (let i = 0; i < 300; i++) {
+      p.update(1 / 60, { ...idle(), move }, w);
+      minD = Math.min(minD, p.pos.distanceTo(A));
+      maxY = Math.max(maxY, p.pos.y);
+      maxX = Math.max(maxX, Math.abs(p.pos.x));
+    }
+    return { minD, maxY, maxX };
+  };
+  const fwd = run({ x: 0, y: 1 }, Math.PI / 2); // 鏡頭朝側面，往前推仍然沿繩子
+  assert.ok(fwd.minD < 9, `forward reached ${fwd.minD.toFixed(1)}m from the anchor`);
+  assert.ok(fwd.maxX < 3, `went straight along the rope (sideways drift ${fwd.maxX.toFixed(1)}m)`);
+  assert.ok(fwd.maxY < 48 + 6, `no big overshoot above the anchor (peak ${fwd.maxY.toFixed(1)}m)`);
+});
+
+test('hooked + stick sideways: circles around the anchor (perpendicular to the rope)', () => {
+  const p = new PlayerController(CONFIG);
+  p.speedScale = CONFIG.player.defaultSpeedScale;
+  p.pos.set(0, 30, 40);
+  const A = new Vector3(0, 40, 0);
+  p.fireHook('right', p.pos.clone(), anchorAt(0, 40, 0));
+  for (let i = 0; i < 20; i++) p.update(1 / 60, idle(), facing(p, A));
+  const d0 = p.pos.distanceTo(A);
+  let swept = 0, prev = Math.atan2(p.pos.x, p.pos.z);
+  for (let i = 0; i < 120; i++) {
+    p.update(1 / 60, { ...idle(), move: { x: 1, y: 0 } }, facing(p, A));
+    const a = Math.atan2(p.pos.x, p.pos.z);
+    swept += Math.atan2(Math.sin(a - prev), Math.cos(a - prev));
+    prev = a;
+  }
+  assert.ok(Math.abs(swept) > 1.0, `orbited ${((Math.abs(swept) * 180) / Math.PI).toFixed(0)}° around the anchor`);
+  assert.ok(p.pos.distanceTo(A) < d0, 'and spiralled inward (auto-reel)');
 });

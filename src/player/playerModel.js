@@ -3,6 +3,10 @@ import * as THREE from 'three';
 
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const _bq = new THREE.Quaternion();
+const _pq = new THREE.Quaternion();
+const _bd = new THREE.Vector3();
+const _NEG_Z = new THREE.Vector3(0, 0, -1);
 const _up = new THREE.Vector3(0, 1, 0);
 
 function mesh(geo, mat, x = 0, y = 0, z = 0) {
@@ -167,6 +171,9 @@ export class PlayerModel {
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
     this.yaw += dy * Math.min(1, dt * 10);
     this.root.rotation.y = this.yaw;
+    // 轉身速度（往右轉為負）：拿來決定往彎內傾斜多少
+    const yr = dt > 1e-5 ? (dy * Math.min(1, dt * 10)) / dt : 0;
+    this.yawRate = (this.yawRate || 0) + (yr - (this.yawRate || 0)) * Math.min(1, dt * 10);
 
     // 空中依速度向量前傾
     const airborne = !pc.grounded;
@@ -179,13 +186,13 @@ export class PlayerModel {
     } else if (pc.sliding) {
       _q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.35);
     } else if (pc.grounded && hs > 1) {
-      // 地面奔跑：壓低身體前傾
-      _q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.45 * Math.min(1, hs / 9));
+      // 地面奔跑：整體微微前傾（主要的彎腰在腰部）
+      _q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.15 * Math.min(1, hs / 9));
     } else {
       _q.identity();
     }
     // 側傾：重心往彎內傾（右轉往右傾）。地面依轉向角度、空中依側向加速度（繞圈、擺盪時整個人斜躺）
-    let bank = Math.max(-0.35, Math.min(0.35, dy * 0.9)) * Math.min(1, hs / 6);
+    let bank = Math.max(-0.55, Math.min(0.55, this.yawRate * 0.26)) * Math.min(1, hs / 6);
     if (airborne && pc.accel) {
       const lat = pc.accel.x * Math.cos(this.yaw) - pc.accel.z * Math.sin(this.yaw);
       bank = Math.max(-1.1, Math.min(1.1, -lat / 26)) + bank * 0.5;
@@ -229,20 +236,28 @@ export class PlayerModel {
     // 姿勢
     const L = this.legL, R = this.legR;
     let running = false;
+    this.hips.rotation.x = 0;
+    this.head.rotation.x = 0;
     if (pc.grounded && !pc.sliding && hs > 0.5) {
-      // 持刀壓低奔跑：步幅大、膝蓋彎，雙手握刀往後拖（不擺手）
+      // 迎風奔跑：上身往前彎到接近水平（頭在前上、腰在中、膝蓋與腳跟拖在後下），雙手握刀往後拖
       running = true;
       const k = Math.min(1, hs / 8);
       const ph = t * (hs * 1.0 + 5);
-      const a = Math.sin(ph) * k * 1.05;
-      L.hip.rotation.x = a + 0.25 * k;
-      R.hip.rotation.x = -a + 0.25 * k;
-      L.knee.rotation.x = -(0.35 + Math.max(0, -a) * 1.5) * k;
-      R.knee.rotation.x = -(0.35 + Math.max(0, a) * 1.5) * k;
-      const bob = Math.sin(ph * 2) * 0.05 * k;
-      this.armL.shoulder.rotation.x = -0.25 - 0.8 * k + bob;
-      this.armR.shoulder.rotation.x = -0.25 - 0.8 * k - bob;
-      this.hips.position.y = 0.95 - 0.13 * k + Math.abs(Math.cos(ph)) * 0.05 * k;
+      const a = Math.sin(ph) * k * 0.6;
+      const bend = 1.25 * k; // 腰往前彎（加上身體微傾，上身約 80°）
+      this.hips.rotation.x = -bend;
+      this.head.rotation.x = bend * 0.85; // 頭抬起來看前方
+      // 腿：抵銷腰彎後整體往後下方斜（腳跟遠離腰），前後擺動
+      const legBase = bend + 0.15 * k - 0.42 * k;
+      L.hip.rotation.x = legBase + a;
+      R.hip.rotation.x = legBase - a;
+      L.knee.rotation.x = -(0.5 + Math.max(0, a) * 1.4) * k;
+      R.knee.rotation.x = -(0.5 + Math.max(0, -a) * 1.4) * k;
+      const bob = Math.sin(ph * 2) * 0.04 * k;
+      // 手臂沿著背往後拖（上身彎下時「往下」就是往後）
+      this.armL.shoulder.rotation.x = -0.15 + bob;
+      this.armR.shoulder.rotation.x = -0.15 - bob;
+      this.hips.position.y = 0.95 - 0.24 * k + Math.abs(Math.cos(ph)) * 0.05 * k;
     } else if (pc.sliding) {
       L.hip.rotation.x = 1.2;
       L.knee.rotation.x = -0.1;
@@ -284,13 +299,13 @@ export class PlayerModel {
     this.armR.fore.rotation.x = -0.5;
     this.armL.sword.rotation.x = this.armR.sword.rotation.x = 0;
     if (running) {
-      // 手臂往兩側張開一點，刀尖朝後下方
+      // 手臂往兩側張開
       const k = Math.min(1, hs / 8);
-      this.armL.shoulder.rotation.z = -0.25 - 0.3 * k;
-      this.armR.shoulder.rotation.z = 0.25 + 0.3 * k;
-      this.armL.fore.rotation.x = this.armR.fore.rotation.x = -0.25;
-      this.armL.sword.rotation.x = this.armR.sword.rotation.x = 0.5 * k;
+      this.armL.shoulder.rotation.z = -0.3 - 0.35 * k;
+      this.armR.shoulder.rotation.z = 0.3 + 0.35 * k;
+      this.armL.fore.rotation.x = this.armR.fore.rotation.x = -0.15;
     }
+    this._running = running;
     if (pc.sliding && hs > 6) {
       // 滑行／滑鏟：右手的刀壓低拖在地上（刮出火花）
       this.armR.shoulder.rotation.x = 0.35;
@@ -309,6 +324,26 @@ export class PlayerModel {
       this.armL.shoulder.rotation.z = -0.25 - Math.sin(k * Math.PI) * 0.8 * this.slashSide;
       this.armR.shoulder.rotation.z = 0.25 - Math.sin(k * Math.PI) * 0.8 * this.slashSide;
       this.armL.fore.rotation.x = this.armR.fore.rotation.x = -0.2;
+    }
+
+    // 刀的方向：刀身與身體垂直（往兩側伸出、刀尖略朝外下、略往後），跟著身體傾斜；
+    // 轉彎往內傾時，內側的刀尖會壓向地面。揮砍、迴旋、滑行時交給動作本身
+    const posing = this.slashTimer > 0 || this.spinTimer > 0 || this.leviMode || (pc.sliding && hs > 6);
+    if (!posing) {
+      this.root.updateMatrixWorld(true);
+      const back = running ? 0.3 : airborne ? 0.45 : 0.15;
+      const down = running ? 0.32 : airborne ? 0.15 : 0.7;
+      this.body.getWorldQuaternion(_bq);
+      for (const [arm, sx] of [[this.armL, -1], [this.armR, 1]]) {
+        _bd.set(sx, -down, back).normalize().applyQuaternion(_bq); // 身體座標 → 世界
+        arm.fore.getWorldQuaternion(_pq);
+        _bd.applyQuaternion(_pq.invert()); // 世界 → 前臂座標
+        arm.sword.quaternion.setFromUnitVectors(_NEG_Z, _bd);
+      }
+    } else {
+      this.armL.sword.quaternion.identity();
+      this.armR.sword.quaternion.identity();
+      if (pc.sliding && hs > 6) this.armR.sword.rotation.x = -0.7;
     }
 
     // 披風隨速度飄動

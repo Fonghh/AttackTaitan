@@ -988,6 +988,17 @@ export class Game {
   /** 高速貼地或貼牆時，刀尖刮出火花 */
   _bladeSparks() {
     const pc = this.pc;
+    // 地面奔跑轉彎：往內傾時內側刀尖壓到地面 → 刮出火花
+    const m = this.model;
+    if (pc.grounded && m._running && Math.abs(m.bank || 0) > 0.18 && pc.speed > 6) {
+      m.bladeWorld(m.bank < 0 ? 'right' : 'left', _v2, _bladeTip, true);
+      if (_bladeTip.y < 0.55) {
+        _bladeTip.y = 0.05;
+        this.fx.sparks(_bladeTip, pc.vel, 3);
+        if (Math.random() < 0.15) this.audio.play('scrape');
+      }
+      return;
+    }
     if (pc.feelSpeed < 24 && !(pc.sliding && pc.speed > 8)) return;
     const tip = this.model.bladeWorld('right', _v2, _bladeTip, true) || _bladeTip;
     let hit = null;

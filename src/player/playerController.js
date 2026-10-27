@@ -15,6 +15,9 @@ const _tmp = new Vector3();
 const _anchor = new Vector3();
 const _right = new Vector3();
 const _fwd = new Vector3();
+const _ropeDir = new Vector3();
+const _v1 = new Vector3();
+const _steer = new Vector3();
 
 export class PlayerController {
   constructor(cfg) {
@@ -231,6 +234,11 @@ export class PlayerController {
         if (!hk.attached) continue;
         const d = this.pos.distanceTo(hk.anchor(_anchor));
         const R = this.orbitRadiusFor(hk);
+        // 放鬆的鋼索被「往前推」拉緊
+        if (hk.slack && intent.move.y > 0.5 && !dashing && !this.flip) {
+          hk.slack = false;
+          hk.length = Math.min(hk.length, d);
+        }
         // 放鬆的鋼索（衝刺抵達後）：往上衝時不扯住，往回掉時跟著收，重新繃緊就恢復自動收繩
         if (hk.slack) {
           // 只在真的衝過頭（比抵達時遠 6m 以上）、飛過最遠點開始往下掉之後才收；
@@ -243,24 +251,25 @@ export class PlayerController {
         const onTitan = !!hk.object?.userData?.titan;
         const arriveAt = dashing || !onTitan ? A : Math.max(A, R);
         hk.floorR = onTitan && !dashing ? R : 0;
-        const passed = d < Math.max(A * 2.5, R * 1.5) && this.vel.dot(_tmp.subVectors(_anchor, this.pos)) < 0; // 已經衝過勾點
+        // 已經衝過勾點（往前推時要更靠近才算，才不會在巨人胸口就被判定抵達）
+        const passR = intent.move.y > 0.5 ? A * 1.5 : Math.max(A * 2.5, R * 1.5);
+        const passed = d < passR && this.vel.dot(_tmp.subVectors(_anchor, this.pos)) < 0;
         if (hk.pullOn && (d < arriveAt || passed)) {
           hk.pullOn = false;
           if (dashing) this._dashArrive(hk, d);
           else this.emit('arrive', { side });
-        } else if (!hk.pullOn && !hk.slack && d > Math.max(A * 3, R * 2)) hk.pullOn = true;
+        } else if (!hk.pullOn && !hk.slack && (d > Math.max(A * 3, R * 2) || (intent.move.y > 0.5 && d > arriveAt + 2))) hk.pullOn = true;
         // 自動收繩：固定速度收到繞圈半徑；搖桿往遠離勾點推＝暫停（實際收短在物理子步驟裡做，比較平順）
         hk.reelRate = 0;
         hk.orbitR = R;
         if (!hk.slack && !dashing && !this.busy && hk.length > R && this.autoReel > 0) {
-          _tmp.subVectors(_anchor, this.pos).setY(0);
-          const away = _tmp.lengthSq() > 1e-4 ? _wish.dot(_tmp.normalize()) : 0;
-          this.reelHold = away < PL.holdDot;
-          if (!this.reelHold) hk.reelRate = this.autoReel;
+          if (intent.move.y >= PL.holdDot) hk.reelRate = this.autoReel; // 搖桿往後拉＝暫停收繩
         }
       }
     }
-    const pulling = attached && this.ropeStyle === 'pull' && !this.busy && (this.hooks.left.pullOn || this.hooks.right.pullOn);
+    // 搖桿往後拉＝暫停收繩、停止拉動，維持目前距離
+    this.reelHold = attached && this.ropeStyle === 'pull' && !dashing && intent.move.y < cfg.hook.pull.holdDot;
+    const pulling = attached && this.ropeStyle === 'pull' && !this.busy && !this.reelHold && (this.hooks.left.pullOn || this.hooks.right.pullOn);
     this.pulling = pulling;
     this.reeling = pulling ? 1 : attached ? Math.max(intent.reel, dashing ? 1 : 0) : 0;
 
@@ -319,7 +328,8 @@ export class PlayerController {
       if (this.flip.t <= 0) {
         // 自動煞車＋短暫滯空，不會一路飛過頭
         this.vel.multiplyScalar(F.brake);
-        this.hangTimer = F.hang;
+        if (F.hang > 0) this.hangTimer = F.hang;
+        this.capBoost = Math.max(this.capBoost, this.speed); // 保留慣性：最高速度上限之後慢慢降
         this.flip = null;
         this.emit('flipEnd', {});
       }
@@ -341,6 +351,21 @@ export class PlayerController {
       }
     }
 
+    // 勾住（拉索）時的搖桿：前＝沿繩子朝勾點、左右＝垂直於繩子繞著勾點橫移（以鏡頭右方為準）
+    this.ropeFwd = 0;
+    this.ropeHook = null;
+    if (attached && this.ropeStyle === 'pull' && !this.busy) {
+      for (const side of ['left', 'right']) {
+        const hk = this.hooks[side];
+        if (hk.attached && (!this.ropeHook || (this.ropeHook.slack && !hk.slack))) this.ropeHook = hk;
+      }
+      this.ropeHook.anchor(_ropeDir).sub(this.pos).normalize();
+      this.ropeFwd = this.ropeHook.slack ? 0 : Math.max(0, intent.move.y);
+      _steer.copy(_right).addScaledVector(_ropeDir, -_right.dot(_ropeDir));
+      if (_steer.lengthSq() > 1e-4) _steer.normalize().multiplyScalar(intent.move.x);
+      else _steer.set(0, 0, 0);
+    }
+
     const wasGrounded = this.grounded;
     const n = substepCount(this.speed + 10, dt);
     const h = dt / n;
@@ -349,7 +374,9 @@ export class PlayerController {
 
     for (let i = 0; i < n; i++) {
       if (!this.busy) {
-        const gScale = pulling ? (dashing ? cfg.dash.gravityScale : cfg.hook.pull.gravityScale) : this.hangTimer > 0 ? cfg.fling.hangGravityScale : 1;
+        let gScale = pulling ? (dashing ? cfg.dash.gravityScale : cfg.hook.pull.gravityScale) : this.hangTimer > 0 ? cfg.fling.hangGravityScale : 1;
+        // 往前推（沿繩子捲進）時重力降低，推到底＝無重力；擺盪（不推）時照常
+        if (this.ropeHook) gScale *= 1 - this.ropeFwd * (1 - cfg.hook.pull.forwardGravity);
         this.vel.y -= cfg.gravity * gScale * h;
 
         if (this.grounded && !(attached && this.reeling > 0)) {
@@ -357,7 +384,11 @@ export class PlayerController {
         } else {
           // 空中轉向；勾住時側向操控更強（朝方向鍵的方向擺盪／橫移）
           const steer = attached ? (this.ropeStyle === 'pull' ? cfg.hook.pull.steerAccel : P.airAccel) * this.steerScale : P.airAccel;
-          this.vel.addScaledVector(_wish, steer * h);
+          if (this.ropeHook) {
+            // 左右：繞著勾點橫移；前：沿繩子朝勾點加速（接近時減速，衝刺時不限）
+            this.vel.addScaledVector(_steer, steer * h);
+            if (this.ropeFwd > 0) this._ropeForward(h, dashing);
+          } else this.vel.addScaledVector(_wish, steer * h);
           if (airThrust) this.vel.y += P.airThrust * h;
         }
 
@@ -601,6 +632,29 @@ export class PlayerController {
     }
   }
 
+  /** 往前推：沿著繩子（含上下）朝勾點加速，接近勾點時依距離減速 */
+  _ropeForward(h, dashing) {
+    const PL = this.cfg.hook.pull;
+    const hk = this.ropeHook;
+    hk.anchor(_tmp).sub(this.pos);
+    const d = _tmp.length();
+    if (d < 1e-3) return;
+    _tmp.multiplyScalar(1 / d);
+    const along = this.vel.dot(_tmp);
+    let vT = Math.max(PL.minSpeed, PL.forwardSpeed * this.speedScale);
+    const stopAt = Math.max(PL.arriveDist, hk.floorR || 0);
+    if (!dashing) vT = Math.min(vT, Math.sqrt(2 * PL.brakeDecel * Math.max(0, d - stopAt)) + 3);
+    const a = PL.forwardAccel * this.ropeFwd * h;
+    if (along < vT) this.vel.addScaledVector(_tmp, Math.min(a, vT - along));
+    else if (!dashing) this.vel.addScaledVector(_tmp, -Math.min(a, along - vT)); // 接近勾點：減速，不撞上、不衝過頭
+    // 快到勾點時收掉橫向速度：停在勾點上（爬牆到頂再放索翻上去）
+    if (!dashing && d < stopAt * 2.2) {
+      const tAlong = this.vel.dot(_tmp);
+      _v1.copy(this.vel).addScaledVector(_tmp, -tAlong);
+      this.vel.addScaledVector(_v1, -Math.min(1, 4 * this.ropeFwd * h));
+    }
+  }
+
   /** 這條鋼索的繞圈半徑：建築＝設定值；巨人＝設定值 × 倍率 × 體型 */
   orbitRadiusFor(hk) {
     const t = hk.object?.userData?.titan;
@@ -652,7 +706,8 @@ export class PlayerController {
           hk.length = Math.max(H.minLength, Math.min(hk.length, dist) - reel * h);
           if (along < reel) this.vel.addScaledVector(_anchor, Math.min(D.radialAccel * Math.max(0.4, this.dashScale) * r * h, reel - along));
           if (hk.prevDist && dist < hk.prevDist) {
-            const k = (Math.min(D.spinUpMax, hk.prevDist / dist) - 1) * r;
+            // 往前推＋衝刺＝直衝目標（不放大擺盪）；不推＝擺盪式衝刺
+            const k = (Math.min(D.spinUpMax, hk.prevDist / dist) - 1) * r * (1 - this.ropeFwd);
             _tmp.copy(this.vel).addScaledVector(_anchor, -this.vel.dot(_anchor));
             this.vel.addScaledVector(_tmp, k);
           }
