@@ -116,7 +116,7 @@ export class Game {
     if (!(this.gyroLevel in cfg.camera.gyro.levels)) this.gyroLevel = cfg.camera.gyro.defaultLevel;
     this.lockCam = this._load('lockCam', cfg.camera.lock.enabled ? 'on' : 'off') === 'on';
     this.closeCam = this._load('closeCam', cfg.camera.close.enabled ? 'on' : 'off') === 'on';
-    this.camRollLevel = this._load('camRoll', cfg.camera.roll.defaultLevel);
+    this.camRollLevel = this._load('camRoll2', cfg.camera.roll.defaultLevel);
     if (!(this.camRollLevel in cfg.camera.roll.levels)) this.camRollLevel = cfg.camera.roll.defaultLevel;
     this.joyTurnLevel = this._load('joyTurn', cfg.camera.joyTurn.defaultLevel);
     if (!(this.joyTurnLevel in cfg.camera.joyTurn.levels)) this.joyTurnLevel = cfg.camera.joyTurn.defaultLevel;
@@ -129,6 +129,7 @@ export class Game {
       return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : def;
     };
     this.pc.autoReel = num('autoReel', cfg.hook.pull.autoReel, 0, 20);
+    cfg.hook.range = num('hookRange', cfg.hook.range, 60, 150);
     this.pc.orbitRadius = num('orbitRadius', cfg.hook.pull.orbitRadius, 4, 20);
     this.pc.speedScale = Math.max(0.1, Math.min(1.5, Number(this._load('speedScale2', String(cfg.player.defaultSpeedScale))) || cfg.player.defaultSpeedScale));
     this.touchUI.setMode(this.hookMode);
@@ -236,7 +237,7 @@ export class Game {
     $('btn-camroll').addEventListener('click', () => {
       const order = ['high', 'low', 'off'];
       this.camRollLevel = order[(order.indexOf(this.camRollLevel) + 1) % order.length];
-      this._save('camRoll', this.camRollLevel);
+      this._save('camRoll2', this.camRollLevel);
       this._syncModeLabel();
     });
     $('btn-joyturn').addEventListener('click', () => {
@@ -262,6 +263,13 @@ export class Game {
       this._save('orbitRadius', String(this.pc.orbitRadius));
       this._syncModeLabel();
     };
+    const setRange = (d) => {
+      this.cfg.hook.range = Math.max(60, Math.min(150, this.cfg.hook.range + d));
+      this._save('hookRange', String(this.cfg.hook.range));
+      this._syncModeLabel();
+    };
+    $('range-down').addEventListener('click', () => setRange(-10));
+    $('range-up').addEventListener('click', () => setRange(10));
     $('reel-down').addEventListener('click', () => setReel(-1));
     $('reel-up').addEventListener('click', () => setReel(1));
     $('orbit-down').addEventListener('click', () => setOrbit(-1));
@@ -294,11 +302,12 @@ export class Game {
     document.getElementById('btn-hookfollow').textContent = this.hookFollow ? '鉤住時鏡頭跟隨人物：開' : '鉤住時鏡頭跟隨人物：關';
     document.getElementById('spd-val').textContent = `速度 ${Math.round(this.pc.speedScale * 100)}%`;
     document.getElementById('dash-val').textContent = `衝刺 ${Math.round(this.pc.dashScale * 100)}%（${Math.round(this.cfg.dash.speed * this.pc.dashScale)} m/s）`;
+    document.getElementById('range-val').textContent = `鉤索射程 ${this.cfg.hook.range}m`;
     document.getElementById('reel-val').textContent = this.pc.autoReel > 0 ? `自動收繩 ${this.pc.autoReel} m/秒` : '自動收繩：關';
     document.getElementById('orbit-val').textContent = `繞圈半徑 ${this.pc.orbitRadius}m（巨人 ×${(this.cfg.hook.pull.orbitTitanFactor * 1).toFixed(2)}×體型）`;
     document.getElementById('btn-lockcam').textContent = `鎖定鏡頭（勾住巨人時）：${this.lockCam ? '開' : '關'}`;
     document.getElementById('btn-closecam').textContent = `近距離廣角鏡頭：${this.closeCam ? '開' : '關'}`;
-    document.getElementById('btn-camroll').textContent = `鏡頭側傾：${{ high: '強', low: '弱', off: '關' }[this.camRollLevel]}`;
+    document.getElementById('btn-camroll').textContent = `鏡頭側傾：${{ high: '18°', low: '9°', off: '0°（不傾斜）' }[this.camRollLevel]}`;
     document.getElementById('btn-gyro').textContent = `陀螺儀瞄準：${{ high: '強', mid: '中', low: '弱', off: '關' }[this.gyroLevel]}`;
     document.getElementById('btn-joyturn').textContent = `空中左搖桿轉鏡頭：${{ high: '強', mid: '中', low: '弱', off: '關' }[this.joyTurnLevel]}`;
     document.getElementById('btn-lines').textContent = `速度線：${{ high: '高', mid: '中', low: '低', off: '關' }[this.speedLineLevel]}`;
@@ -394,6 +403,7 @@ export class Game {
     this.endTimer = 0;
     this.strikeCooldown = 0;
     this.chroma = 0;
+    this.impact = 0;
     this.flickTurn = null;
     this.passThrough = 0;
     this.strikeHold = null;
@@ -490,7 +500,7 @@ export class Game {
     const aim = this.aims[key];
     if (!aim) {
       this.audio.play('miss');
-      this.hud.toast('準星上沒有可勾的目標（射程 85m）', 'warn', 0.8);
+      this.hud.toast(`準星上沒有可勾的目標（射程 ${this.cfg.hook.range}m）`, 'warn', 0.8);
       return;
     }
     const side = key === 'auto' ? this.autoSide : key;
@@ -503,7 +513,7 @@ export class Game {
     const aim = this.aims[key];
     if (!aim) {
       this.audio.play('miss');
-      this.hud.toast('準心上沒有可勾的目標（射程 85m）', 'warn', 0.8);
+      this.hud.toast(`準心上沒有可勾的目標（射程 ${this.cfg.hook.range}m）`, 'warn', 0.8);
       return;
     }
     const side = key === 'auto' ? this.autoSide : key;
@@ -896,6 +906,7 @@ export class Game {
     this.fx.napeHit(this.napePos, dir, perfect);
     titan.addWound(this.napePos, 1.3 * titan.scale);
     this.rig.punch(this.napePos);
+    this.impact = this.cfg.strike.impactFrame;
     if (perfect) this.hud.killBurst(false);
     this.audio.play('hitNape');
     // 頓點 → 慢動作 → 恢復；鏡頭往前推並猛震
@@ -922,10 +933,11 @@ export class Game {
     if (this.grab && this.grab.titan === titan) this._endGrab(true);
     this.audio.play('kill');
     this.audio.play('killBoom');
+    this.impact = this.cfg.strike.impactFrame * 1.5;
     this.hud.killBurst(true);
     this.hitStop = 0.2;
     this.slowMo = this.slowMoMax = 1.2;
-    this.rig.startKillCam(titan, this.napePos);
+    this.rig.startKillCam(titan, this.napePos, this.pc);
     const left = this.titans.filter((t) => t.alive).length;
     this.hud.toast(left === 0 ? '全部討伐完成！' : `討伐成功！還剩 ${left} 隻`, 'good big', 2.2);
     this._missionEvent('kill');
@@ -1002,9 +1014,16 @@ export class Game {
   _updateChroma(dt) {
     if (this.pc.lunge || this.pc.levi?.phase === 'dash') this.chroma = Math.max(this.chroma, 0.4);
     this.chroma = Math.max(0, (this.chroma || 0) - dt * 1.6);
+    if (this.impact > 0) this.impact -= dt;
     const c = this.renderer.domElement;
     const px = (this.chroma * 9).toFixed(1);
-    const f = this.chroma > 0.02 ? `drop-shadow(${px}px 0 0 rgba(255,40,60,0.55)) drop-shadow(-${px}px 0 0 rgba(40,170,255,0.55))` : 'none';
+    // 衝擊幀：命中瞬間整個畫面變成白底黑剪影（真實時間約 0.12 秒）
+    const f =
+      this.impact > 0
+        ? 'grayscale(1) brightness(2.6) contrast(9)'
+        : this.chroma > 0.02
+          ? `drop-shadow(${px}px 0 0 rgba(255,40,60,0.55)) drop-shadow(-${px}px 0 0 rgba(40,170,255,0.55))`
+          : 'none';
     if (c.style.filter !== f) c.style.filter = f;
   }
 
@@ -1176,7 +1195,8 @@ export class Game {
       close: !!(pc.lunge || pc.levi || pc.dashGlow > 0.35), // 衝刺時鏡頭拉近（放開後跟著速度感慢慢退）
       realDt: this.realDt,
     });
-    this.model.update(dt, pc, this.rig.yaw);
+    // 鎖定時角色身體朝向目標（背對鏡頭繞圈，出刀一直朝著巨人）
+    this.model.update(dt, pc, this.rig.yaw, lockTarget ? this.rig.yaw : null);
     this.city.update(pc.pos);
 
     // 鋼索瞄準預測（供下一次發射與 HUD 標記使用）
@@ -1191,17 +1211,24 @@ export class Game {
     this.fx.update(dt, pc, this.model, this.camera);
     // 瓦斯雲軌跡：勾住飛行、噴氣、衝刺時身後拖出白色瓦斯（衝刺最濃）
     const flying = !pc.grounded && pc.feelSpeed > 14;
-    if (pc.dashing || pc.levi?.phase === 'dash') this.fx.gasTrail(pc.pos, pc.vel, 1);
+    if (pc.dashing || pc.flip || pc.levi?.phase === 'dash') this.fx.gasTrail(pc.pos, pc.vel, 1);
     else if (pc.groundDashing) this.fx.gasTrail(pc.pos, pc.vel, 0.45);
     else if (pc.boosting || (flying && pc.anyAttached)) this.fx.gasTrail(pc.pos, pc.vel, 0.55);
     else if (flying && pc.feelSpeed > 30) this.fx.gasTrail(pc.pos, pc.vel, 0.2);
     // 刀刃擦地／擦牆火花
     this._bladeSparks();
+    // 鎖定繞圈、靠近巨人時：自動甩出連續的淡刀光
+    this.idleSlashT = (this.idleSlashT || 0) - dt;
+    if (lockTarget && pc.feelSpeed > 20 && this.idleSlashT <= 0 && pc.pos.distanceTo(lockTarget) < 16 * (lockTitan?.scale || 1)) {
+      this.idleSlashT = 0.2;
+      this.idleSide = -(this.idleSide || 1);
+      this.fx.idleSlash(_v.copy(pc.pos).addScaledVector(this.rig.forward, 1.0), this.rig.forward, this.idleSide);
+    }
     // 風壓漩渦：高速繞圈（側向加速度大）、衝刺、兵長斬、迴旋斬
     const lat = Math.hypot(pc.accel.x, pc.accel.z);
     let swirl = flying ? Math.min(1, Math.max(0, (pc.feelSpeed - 35) / 40) * Math.min(1, lat / 25)) : 0;
     if (pc.dashing) swirl = Math.max(swirl, 0.4 * pc.dashRamp);
-    if (pc.levi || this.model.spinTimer > 0) swirl = 1;
+    if (pc.levi || pc.flip || this.model.spinTimer > 0) swirl = 1;
     this.fx.updateSwirl(dt, pc.pos, pc.vel, swirl);
     if (pc.lunge) this.fx.trail(pc.pos);
     if (pc.levi) this.fx.leviTrail(pc.pos, pc.levi.phase === 'dash');
@@ -1341,6 +1368,17 @@ export class Game {
         break;
       case 'dash':
         this.audio.play('boost');
+        break;
+      case 'flip':
+        this.audio.play('boost');
+        this.audio.play('swing');
+        this.rig.kick(10);
+        this.rig.addShake(0.2);
+        this.chroma = Math.max(this.chroma, 0.3);
+        this.fx.gasTrail(this.pc.pos, this.pc.vel, 1);
+        break;
+      case 'flipEnd':
+        this.fx.gasPuff(this.pc.pos, this.pc.vel, true);
         break;
       case 'groundDash':
         this.audio.play('boost');

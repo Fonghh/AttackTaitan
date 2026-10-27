@@ -111,6 +111,16 @@ export const CONFIG = {
     groundTime: 0.35, // 放開後還能穿過巨人／自動砍腳的秒數
     groundGas: 4, // 按下瞬間耗氣
     groundGasUse: 16, // 按住時每秒耗氣
+    // 翻轉衝刺：空中快速連點兩下衝刺 → 身體翻一圈，往搖桿（沒推就往鏡頭）方向爆衝一段，然後自動煞車、短暫滯空（不會一路飛走）
+    flip: {
+      window: 0.3, // 兩次按下的間隔（秒）
+      speed: 44, // 爆衝速度 m/s × max(0.6, 速度倍率)
+      time: 0.42, // 爆衝秒數（約 18～25m）
+      brake: 0.35, // 結束時速度剩下這個比例
+      hang: 0.45, // 結束後滯空秒數（減重）
+      gas: 15,
+      cooldown: 0.8,
+    },
   },
 
   boost: {
@@ -166,6 +176,7 @@ export const CONFIG = {
     spinRange: 7, // 迴旋斬範圍（× 巨人體型）
     spinSpeedFactor: 0.6, // 迴旋斬的速度門檻 = 一般斬擊 × 此值
     spinDamageBonus: 1.15,
+    impactFrame: 0.12, // 衝擊幀：命中後頸／兵長斬／擊殺時，畫面變成白底黑剪影的秒數（真實時間）
     hitStop: 0.11, // 頓點：命中瞬間畫面停住（秒）
     hitStopPerfect: 0.18,
     slowMo: 0.35, // 頓點後的慢動作恢復時間（秒）
@@ -250,9 +261,10 @@ export const CONFIG = {
     },
     // 鏡頭側傾：依側向加速度（繞圈、擺盪轉彎）傾斜，像飛機轉彎
     // perYawRate：鏡頭每秒轉 1 弧度時傾斜多少弧度（繞圈、轉彎時往彎內傾）
-    roll: { levels: { high: 1, low: 0.5, off: 0 }, defaultLevel: 'high', maxDeg: 18, perAccel: 0.012, perYawRate: 0.32, rate: 6 },
+    // 等級：high＝最多 18°、low＝最多 9°、off＝0°（不傾斜）
+    roll: { levels: { high: 1, low: 0.5, off: 0 }, defaultLevel: 'low', maxDeg: 18, perAccel: 0.012, perYawRate: 0.32, rate: 6 },
     // 近距離廣角鏡頭：角色更大、背景掠過更快
-    close: { enabled: true, distance: 4.3, maxExtraDist: 2.8, fovPerSpeed: 0.42, maxExtraFov: 34 },
+    close: { enabled: true, distance: 3.3, maxExtraDist: 2.0, fovPerSpeed: 0.42, maxExtraFov: 34 },
     groundSkim: { height: 4, minSpeed: 15, drop: 1.0 }, // 貼地高速飛行時鏡頭壓低
     punch: { amount: 0.4, time: 0.28 }, // 命中時鏡頭往命中點推近（比例）
     // 手機：陀螺儀瞄準（轉動手機＝轉動鏡頭），倍率 1 = 手機轉多少鏡頭就轉多少

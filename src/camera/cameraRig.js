@@ -50,17 +50,30 @@ export class CameraRig {
     this.fovKick += deg;
   }
 
-  /** 擊殺特寫：從巨人側面看後頸，慢動作約 1 秒後切回 */
-  startKillCam(titan, napePos) {
+  /**
+   * 擊殺特寫：從側面同時拍到角色與後頸（鏡頭對準兩者中間、距離依兩者距離拉開），
+   * 慢動作中一路跟著角色，約 1 秒後切回。
+   */
+  startKillCam(titan, napePos, pc) {
     const s = titan.scale;
     const f = titan.forward;
     const side = new THREE.Vector3(-f.z, 0, f.x);
     // 選離目前鏡頭比較近的那一側，切換比較不突兀
     if (side.dot(_dir.subVectors(this.camera.position, napePos)) < 0) side.negate();
-    const pos = napePos.clone().addScaledVector(side, 9 * s).addScaledVector(f, -3 * s);
-    pos.y += 1.2 * s;
-    this.cine = { t: 1.1, pos, look: napePos.clone() };
-    this.camera.position.copy(pos);
+    this.cine = { t: 1.1, nape: napePos.clone(), side, f: f.clone(), s, pc, pos: new THREE.Vector3(), look: new THREE.Vector3() };
+    this._cineFrame(true);
+  }
+
+  _cineFrame(snap) {
+    const c = this.cine;
+    // 對準角色與後頸的中點；兩者越遠鏡頭退越遠，保證都在畫面裡
+    const p = c.pc ? c.pc.pos : c.nape;
+    c.look.copy(c.nape).lerp(p, 0.5);
+    const sep = c.nape.distanceTo(p);
+    const dist = Math.max(8 * c.s, sep * 1.25 + 4);
+    c.pos.copy(c.look).addScaledVector(c.side, dist).addScaledVector(c.f, -2.5 * c.s);
+    c.pos.y += 1.2 * c.s;
+    if (snap) this.camera.position.copy(c.pos);
   }
 
   addShake(a) {
@@ -84,6 +97,7 @@ export class CameraRig {
     if (this.cine) {
       const c = this.cine;
       c.t -= opts.realDt ?? dt;
+      this._cineFrame(false);
       this.camera.position.lerp(c.pos, 0.2);
       this.camera.lookAt(c.look);
       if (Math.abs(this.camera.fov - 55) > 0.01) {

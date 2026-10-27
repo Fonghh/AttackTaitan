@@ -344,8 +344,18 @@ function makeSwirl() {
 class SlashArcs {
   constructor(scene) {
     this.items = [];
-    const geo = new THREE.RingGeometry(1.9, 2.25, 40, 1, -0.1, Math.PI * 0.75);
-    for (let i = 0; i < 6; i++) {
+    // 新月形刀光：外緣厚、兩端尖（用頂點位置把內圈往外推做出新月）
+    const geo = new THREE.RingGeometry(1.5, 2.35, 48, 2, -0.25, Math.PI * 1.05);
+    const pa = geo.attributes.position;
+    for (let i = 0; i < pa.count; i++) {
+      const x = pa.getX(i), y = pa.getY(i);
+      const r = Math.hypot(x, y), a = Math.atan2(y, x);
+      const u = (a + 0.25) / (Math.PI * 1.05); // 0..1 沿著弧
+      const thick = Math.sin(Math.max(0, Math.min(1, u)) * Math.PI); // 中間厚、兩端尖
+      const nr = 2.35 - (2.35 - r) * thick;
+      pa.setXY(i, Math.cos(a) * nr, Math.sin(a) * nr);
+    }
+    for (let i = 0; i < 12; i++) {
       const m = new THREE.Mesh(
         geo,
         new THREE.MeshBasicMaterial({ color: '#e8f6ff', transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }),
@@ -357,7 +367,7 @@ class SlashArcs {
     this.i = 0;
   }
 
-  spawn(pos, dir, roll, scale, color) {
+  spawn(pos, dir, roll, scale, color, alpha = 0.85, life = 0.28) {
     const it = this.items[this.i];
     this.i = (this.i + 1) % this.items.length;
     it.m.position.copy(pos);
@@ -366,8 +376,9 @@ class SlashArcs {
     it.m.scale.setScalar(scale);
     it.m.material.color.set(color);
     it.m.visible = true;
-    it.t = it.max;
+    it.t = it.max = life;
     it.s = scale;
+    it.a = alpha;
   }
 
   update(dt) {
@@ -375,8 +386,8 @@ class SlashArcs {
       if (!it.m.visible) continue;
       it.t -= dt;
       const k = Math.max(0, it.t / it.max);
-      it.m.material.opacity = k * 0.5;
-      it.m.scale.setScalar(it.s * (1.3 - 0.3 * k));
+      it.m.material.opacity = k * it.a;
+      it.m.scale.setScalar(it.s * (1.35 - 0.35 * k));
       if (it.t <= 0) it.m.visible = false;
     }
   }
@@ -602,8 +613,13 @@ export class Effects {
 
   slash(pos, dir, side, big) {
     const color = big ? '#ffe2b0' : '#dff2ff';
-    this.slashes.spawn(pos, dir, 0.6 * side, big ? 1.5 : 0.9, color);
-    this.slashes.spawn(pos, dir, Math.PI + 0.6 * side, big ? 1.3 : 0.75, color);
+    this.slashes.spawn(pos, dir, 0.6 * side, big ? 2.6 : 1.7, color);
+    this.slashes.spawn(pos, dir, Math.PI + 0.6 * side, big ? 2.2 : 1.4, '#bfe0ff', 0.6);
+  }
+
+  /** 鎖定繞圈接近目標時，自動甩出的淡刀光（連續揮刀的感覺） */
+  idleSlash(pos, dir, side) {
+    this.slashes.spawn(pos, dir, (0.5 + Math.random() * 0.6) * side, 1.5 + Math.random() * 0.4, '#d8ecff', 0.35, 0.22);
   }
 
   /** 命中點的大閃光 */
@@ -646,7 +662,7 @@ export class Effects {
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2;
       const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
-      this.slashes.spawn(_v2.copy(pos).addScaledVector(dir, 1.2), dir, Math.PI / 2, 1.5, color);
+      this.slashes.spawn(_v2.copy(pos).addScaledVector(dir, 1.2), dir, Math.PI / 2, 2.4, color);
     }
     for (let i = 0; i < 24; i++) {
       const a = Math.random() * Math.PI * 2;

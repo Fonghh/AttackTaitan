@@ -56,6 +56,10 @@ export class PlayerController {
     this.capBoost = 0; // 放開衝刺後保留的最高速度上限（慢慢降）
     this.groundDashTimer = 0;
     this.groundDashing = false;
+    this.flip = null; // 翻轉衝刺 { t, time, dir, speed }
+    this.flipCool = 0;
+    this.lastBoostPress = -9;
+    this.clock = 0;
     this.accel = new Vector3(); // 平滑過的加速度（鏡頭側傾、身體傾斜用）
     this._prevVel = new Vector3();
     this.wallCarry = new Vector3(); // 撞牆損失的水平速度
@@ -86,7 +90,7 @@ export class PlayerController {
 
   /** 衝刺斬／兵長斬期間：角色由招式控制，不受一般物理影響 */
   get busy() {
-    return !!(this.lunge || this.levi);
+    return !!(this.lunge || this.levi || this.flip);
   }
 
   get anyAttached() {
@@ -298,6 +302,29 @@ export class PlayerController {
       }
     }
 
+    // 翻轉衝刺：空中連點兩下衝刺
+    this.clock += dt;
+    if (this.flipCool > 0) this.flipCool -= dt;
+    if (intent.boostPressed && !this.grounded) {
+      const F = cfg.dash.flip;
+      if (this.clock - this.lastBoostPress < F.window && !this.busy && this.flipCool <= 0 && this.gas >= F.gas) {
+        this._startFlip(world);
+        this.lastBoostPress = -9;
+      } else this.lastBoostPress = this.clock;
+    }
+    if (this.flip) {
+      const F = cfg.dash.flip;
+      this.flip.t -= dt;
+      this.vel.copy(this.flip.dir).multiplyScalar(this.flip.speed);
+      if (this.flip.t <= 0) {
+        // 自動煞車＋短暫滯空，不會一路飛過頭
+        this.vel.multiplyScalar(F.brake);
+        this.hangTimer = F.hang;
+        this.flip = null;
+        this.emit('flipEnd', {});
+      }
+    }
+
     // 兵長斬：空中短拍 → 沿鋼索迴旋直衝勾點
     if (this.levi) this._leviMove(dt);
 
@@ -449,7 +476,7 @@ export class PlayerController {
       cap = Math.max(cap, this.capBoost);
       if (this.anySlack) cap = Math.max(cap, dashCap);
     }
-    if (this.levi || this.groundDashTimer > 0) cap = Math.max(cap, this.speed);
+    if (this.levi || this.flip || this.groundDashTimer > 0) cap = Math.max(cap, this.speed);
     softLimitSpeed(this.vel, cap, P.softLimitRate, dt);
     this.maxSpeed = Math.max(this.maxSpeed, this.speed);
     if (dt > 1e-5) {
@@ -491,6 +518,29 @@ export class PlayerController {
     else return;
     const room = D.groundMax * k - hs;
     if (room > 0) this.vel.addScaledVector(_tmp, Math.min(room, D.groundAccel * k * this.dashRamp * dt));
+  }
+
+  /** 翻轉衝刺開始：方向＝搖桿（沒推就鏡頭前方），勾著的鋼索先放鬆（不會被扯住） */
+  _startFlip(world) {
+    const F = this.cfg.dash.flip;
+    const dir = new Vector3();
+    if (_wish.lengthSq() > 0.04) dir.copy(_wish).normalize();
+    else dir.copy(world.camForward);
+    dir.y = Math.max(-0.3, dir.y) + 0.12; // 微微往上，比較不會撞地
+    dir.normalize();
+    for (const side of ['left', 'right']) {
+      const hk = this.hooks[side];
+      if (!hk.attached) continue;
+      const d = this.pos.distanceTo(hk.anchor(_anchor));
+      hk.slack = true;
+      hk.length = d + 40;
+      hk.slackPeak = hk.slackStart = d;
+      hk.pullOn = false;
+    }
+    this.flip = { t: F.time, time: F.time, dir, speed: Math.max(this.speed, F.speed * Math.max(0.6, this.speedScale)) };
+    this.flipCool = F.cooldown;
+    this.gas = Math.max(0, this.gas - F.gas);
+    this.emit('flip', {});
   }
 
   /** 兵長斬：開始空中短拍（之後自動沿鋼索直衝） */

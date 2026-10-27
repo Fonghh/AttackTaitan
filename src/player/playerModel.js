@@ -151,7 +151,8 @@ export class PlayerModel {
     this.slashSide *= -1;
   }
 
-  update(dt, pc, camYaw) {
+  /** faceYaw：指定身體朝向（鎖定鏡頭時朝向目標），null＝照移動方向 */
+  update(dt, pc, camYaw, faceYaw = null) {
     this.time += dt;
     const v = pc.vel;
     const hs = Math.hypot(v.x, v.z);
@@ -160,7 +161,8 @@ export class PlayerModel {
 
     // 朝向：移動時面向速度方向，靜止時面向攝影機前方
     let targetYaw = camYaw;
-    if (hs > 2) targetYaw = Math.atan2(-v.x, -v.z);
+    if (faceYaw != null && !pc.grounded) targetYaw = faceYaw;
+    else if (hs > 2) targetYaw = Math.atan2(-v.x, -v.z);
     let dy = targetYaw - this.yaw;
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
     this.yaw += dy * Math.min(1, dt * 10);
@@ -176,14 +178,17 @@ export class PlayerModel {
       _q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), lean);
     } else if (pc.sliding) {
       _q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.35);
+    } else if (pc.grounded && hs > 1) {
+      // 地面奔跑：壓低身體前傾
+      _q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.45 * Math.min(1, hs / 9));
     } else {
       _q.identity();
     }
-    // 側傾：跟著側向加速度壓向彎內（繞圈、擺盪轉彎時整個人斜躺）
-    let bank = -dy * 1.5;
+    // 側傾：重心往彎內傾（右轉往右傾）。地面依轉向角度、空中依側向加速度（繞圈、擺盪時整個人斜躺）
+    let bank = Math.max(-0.35, Math.min(0.35, dy * 0.9)) * Math.min(1, hs / 6);
     if (airborne && pc.accel) {
       const lat = pc.accel.x * Math.cos(this.yaw) - pc.accel.z * Math.sin(this.yaw);
-      bank = Math.max(-1.1, Math.min(1.1, -lat / 26)) + bank * 0.3;
+      bank = Math.max(-1.1, Math.min(1.1, -lat / 26)) + bank * 0.5;
     }
     this.bank = bank;
     _q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), bank));
@@ -208,6 +213,12 @@ export class PlayerModel {
     am.opacity += (auraTarget - am.opacity) * Math.min(1, dt * 14);
     this.aura.visible = am.opacity > 0.02;
     this.aura.scale.setScalar(this.leviMode === 1 ? 1.25 : 1);
+    if (pc.flip) {
+      // 翻轉衝刺：往前翻一圈
+      const k = 1 - pc.flip.t / pc.flip.time;
+      this._spinQ.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -k * Math.PI * 2);
+      this.body.quaternion.premultiply(this._spinQ);
+    }
     if (this.spinTimer > 0) {
       this.spinTimer -= dt;
       const k = 1 - Math.max(0, this.spinTimer) / 0.45;
@@ -217,16 +228,21 @@ export class PlayerModel {
 
     // 姿勢
     const L = this.legL, R = this.legR;
+    let running = false;
     if (pc.grounded && !pc.sliding && hs > 0.5) {
-      const ph = t * (hs * 1.1 + 4);
-      const a = Math.sin(ph) * Math.min(1, hs / 8) * 0.9;
-      L.hip.rotation.x = a;
-      R.hip.rotation.x = -a;
-      L.knee.rotation.x = -Math.max(0, -a) * 1.2;
-      R.knee.rotation.x = -Math.max(0, a) * 1.2;
-      this.armL.shoulder.rotation.x = -a * 0.7;
-      this.armR.shoulder.rotation.x = a * 0.7;
-      this.hips.position.y = 0.95 + Math.abs(Math.cos(ph)) * 0.05;
+      // 持刀壓低奔跑：步幅大、膝蓋彎，雙手握刀往後拖（不擺手）
+      running = true;
+      const k = Math.min(1, hs / 8);
+      const ph = t * (hs * 1.0 + 5);
+      const a = Math.sin(ph) * k * 1.05;
+      L.hip.rotation.x = a + 0.25 * k;
+      R.hip.rotation.x = -a + 0.25 * k;
+      L.knee.rotation.x = -(0.35 + Math.max(0, -a) * 1.5) * k;
+      R.knee.rotation.x = -(0.35 + Math.max(0, a) * 1.5) * k;
+      const bob = Math.sin(ph * 2) * 0.05 * k;
+      this.armL.shoulder.rotation.x = -0.25 - 0.8 * k + bob;
+      this.armR.shoulder.rotation.x = -0.25 - 0.8 * k - bob;
+      this.hips.position.y = 0.95 - 0.13 * k + Math.abs(Math.cos(ph)) * 0.05 * k;
     } else if (pc.sliding) {
       L.hip.rotation.x = 1.2;
       L.knee.rotation.x = -0.1;
@@ -267,6 +283,14 @@ export class PlayerModel {
     this.armL.fore.rotation.x = -0.5;
     this.armR.fore.rotation.x = -0.5;
     this.armL.sword.rotation.x = this.armR.sword.rotation.x = 0;
+    if (running) {
+      // 手臂往兩側張開一點，刀尖朝後下方
+      const k = Math.min(1, hs / 8);
+      this.armL.shoulder.rotation.z = -0.25 - 0.3 * k;
+      this.armR.shoulder.rotation.z = 0.25 + 0.3 * k;
+      this.armL.fore.rotation.x = this.armR.fore.rotation.x = -0.25;
+      this.armL.sword.rotation.x = this.armR.sword.rotation.x = 0.5 * k;
+    }
     if (pc.sliding && hs > 6) {
       // 滑行／滑鏟：右手的刀壓低拖在地上（刮出火花）
       this.armR.shoulder.rotation.x = 0.35;

@@ -394,3 +394,27 @@ test('after a dash the slack rope takes up as you fall back (no huge swing radiu
   assert.ok(maxExcess <= CONFIG.dash.slackTakeUp + 0.5, `falling back: rope at most ${maxExcess.toFixed(1)}m longer than the distance`);
   assert.ok(p.hooks.right.length < 25, `final rope ${p.hooks.right.length.toFixed(1)}m (was ~59m before)`);
 });
+
+test('flip dash: double-tap dash in the air bursts a fixed distance, then brakes and hangs (no overshoot)', () => {
+  const p = new PlayerController(CONFIG);
+  p.speedScale = CONFIG.player.defaultSpeedScale;
+  p.pos.set(0, 40, 0);
+  const start = p.pos.clone();
+  const press = (i) => ({ ...idle(), move: { x: 1, y: 0 }, boost: i === 0 || i === 6, boostPressed: i === 0 || i === 6 });
+  let flipped = false, maxSpeed = 0;
+  for (let i = 0; i < 40; i++) {
+    p.update(1 / 60, press(i), world());
+    if (p.flip) flipped = true;
+    maxSpeed = Math.max(maxSpeed, p.speed);
+    p.events.length = 0;
+  }
+  const dist = Math.hypot(p.pos.x - start.x, p.pos.z - start.z);
+  assert.ok(flipped, 'second tap within the window starts the flip');
+  assert.ok(dist > 12 && dist < 30, `burst ${dist.toFixed(1)}m sideways`);
+  assert.ok(p.speed < maxSpeed * 0.6, `brakes after the burst (${p.speed.toFixed(1)} of ${maxSpeed.toFixed(1)} m/s)`);
+  // 一次單按不會翻轉
+  const q = new PlayerController(CONFIG);
+  q.pos.set(0, 40, 0);
+  for (let i = 0; i < 20; i++) q.update(1 / 60, { ...idle(), boost: i === 0, boostPressed: i === 0 }, world());
+  assert.ok(!q.flip && q.flipCool <= 0, 'single tap does not flip');
+});
