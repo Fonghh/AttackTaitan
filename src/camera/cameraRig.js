@@ -237,7 +237,7 @@ export class CameraRig {
     this._lastYaw = this.yaw;
     if (dt > 1e-5) this.yawRate += (dyaw / dt - this.yawRate) * Math.min(1, dt * 6);
     let tgtRoll = 0;
-    if (opts.rollLevel > 0 && pc.accel && !pc.grounded) {
+    if (opts.rollLevel > 0 && pc.accel && !pc.grounded && !opts.fixed) { // 固定視角不側傾
       const lat = pc.accel.x * _right.x + pc.accel.z * _right.z;
       const max = (R.maxDeg * Math.PI) / 180;
       tgtRoll = Math.max(-max, Math.min(max, this.yawRate * R.perYawRate - lat * R.perAccel)) * opts.rollLevel;

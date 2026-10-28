@@ -113,7 +113,11 @@ export class Game {
     this.reticle = { x: 0, y: 0 }; // 準心在畫面上的位置（NDC，-1..1）
     // 鋼索模式：single = 單索（按住擺盪，預設）、dual = 左右雙索（進階）
     this.hookMode = this._load('hookMode2', 'single');
-    this.cameraFollow = this._load('cameraFollow2', cfg.camera.autoFollow ? 'on' : 'off') === 'on';
+    // 鏡頭模式：follow = 空中自動轉向飛行方向；free = 不自動轉（鉤住時仍跟隨人物）；
+    // fixed = 固定視角：只有右邊轉視角（或陀螺儀）會轉鏡頭，飛行、擺盪、繞圈、鎖定巨人都不會自動轉
+    this.camMode = this._load('camMode', this._load('cameraFollow2', cfg.camera.autoFollow ? 'on' : 'off') === 'on' ? 'follow' : 'free');
+    if (!['follow', 'free', 'fixed'].includes(this.camMode)) this.camMode = 'follow';
+    this.cameraFollow = this.camMode === 'follow';
     this.pc.ropeStyle = this._load('ropeStyle', cfg.hook.style);
     this.hookFollow = this._load('hookFollow', cfg.camera.hookFollow ? 'on' : 'off') === 'on';
     this.pc.dashScale = Math.max(0.1, Math.min(2, Number(this._load('dashScale', String(cfg.dash.defaultScale))) || cfg.dash.defaultScale));
@@ -294,8 +298,10 @@ export class Game {
     $('spd-down').addEventListener('click', () => setSpeed(-0.1));
     $('spd-up').addEventListener('click', () => setSpeed(0.1));
     $('btn-follow').addEventListener('click', () => {
-      this.cameraFollow = !this.cameraFollow;
-      this._save('cameraFollow2', this.cameraFollow ? 'on' : 'off');
+      const order = ['follow', 'free', 'fixed'];
+      this.camMode = order[(order.indexOf(this.camMode) + 1) % order.length];
+      this.cameraFollow = this.camMode === 'follow';
+      this._save('camMode', this.camMode);
       this._syncModeLabel();
     });
     $('btn-mute').addEventListener('click', () => {
@@ -328,7 +334,7 @@ export class Game {
     document.getElementById('sens-val').textContent = `準心靈敏度 ${Math.round(this.aimSens * 100)}%`;
     document.getElementById('btn-flick').textContent = this.touchUI.flickEnabled ? '快速甩動轉身：開' : '快速甩動轉身：關';
     document.getElementById('steer-val').textContent = `左右擺盪 ${Math.round(this.pc.steerScale * 100)}%（${Math.round(this.cfg.hook.pull.steerAccel * this.pc.steerScale)} m/s²）`;
-    document.getElementById('btn-follow').textContent = this.cameraFollow ? '鏡頭跟隨飛行方向：開' : '鏡頭跟隨飛行方向：關';
+    document.getElementById('btn-follow').textContent = `鏡頭：${{ follow: '跟隨飛行方向', free: '不跟隨飛行方向', fixed: '固定視角（只手動轉）' }[this.camMode]}`;
     document.body.classList.toggle('dual', this.hookMode === 'dual');
   }
 
@@ -1228,7 +1234,8 @@ export class Game {
     }
     this.lowAngle += (low - (this.lowAngle || 0)) * Math.min(1, dt * 2);
     // 鎖定鏡頭：勾在巨人身上 → 鏡頭對準牠；手動轉鏡頭持續一段時間＝解除（直到下次勾住）
-    const lockTitan = this.lockCam ? this._hookedTitan() : null;
+    const fixedCam = this.camMode === 'fixed';
+    const lockTitan = this.lockCam && !fixedCam ? this._hookedTitan() : null;
     const manualTurning = (this.touch && (t.turnX || t.turnY)) || (!this.touch && intent.manualLook && Math.hypot(intent.lookDX, intent.lookDY) > 0.004);
     this.manualTurnTime = manualTurning ? (this.manualTurnTime || 0) + rdt : 0;
     if (!lockTitan) this.lockBroken = false;
@@ -1242,9 +1249,10 @@ export class Game {
     this.rig.update(dt, pc, {
       touch: this.touch,
       joyX: intent.move.x,
-      joyTurn: lockTarget ? 0 : (this.cfg.camera.joyTurn.levels[this.joyTurnLevel] ?? 1), // 鎖定時左搖桿＝繞圈，不轉鏡頭
+      joyTurn: lockTarget || fixedCam ? 0 : (this.cfg.camera.joyTurn.levels[this.joyTurnLevel] ?? 1), // 鎖定時左搖桿＝繞圈，不轉鏡頭
       autoFollow: this.cameraFollow,
-      followYaw: hookFollow ? this.model.yaw : null,
+      followYaw: hookFollow && !fixedCam ? this.model.yaw : null,
+      fixed: fixedCam,
       lowAngle: this.lowAngle,
       lockTarget,
       rollLevel: this.cfg.camera.roll.levels[this.camRollLevel] ?? 0,
