@@ -30,6 +30,7 @@ export class PlayerModel {
     const edge = new THREE.MeshBasicMaterial({ color: '#dff4ff', transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
     this.metalMats = [metal, blade, darkMetal];
     const hair = new THREE.MeshStandardMaterial({ color: '#2a2018', roughness: 0.9 });
+    this.bodyMats = [skin, jacket, pants, boots, cape, hair]; // 兵長斬時全身發紅光
 
     this.root = new THREE.Group(); // 位置與朝向
     this.body = new THREE.Group(); // 傾斜
@@ -152,6 +153,14 @@ export class PlayerModel {
     this.aura.position.y = 0.2;
     this.aura.visible = false;
     this.root.add(this.aura);
+    // 外層光暈（更大、更淡）
+    this.aura2 = new THREE.Mesh(
+      new THREE.SphereGeometry(1.15, 16, 12),
+      new THREE.MeshBasicMaterial({ color: '#ff5a2a', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide }),
+    );
+    this.aura2.position.y = 0.2;
+    this.aura2.visible = false;
+    this.root.add(this.aura2);
     this.leviMode = 0;
     this.leviAngle = 0;
     this._leviAxis = new THREE.Vector3();
@@ -243,24 +252,23 @@ export class PlayerModel {
     this.lean.slerp(_q, Math.min(1, dt * 8));
     this.body.quaternion.copy(this.lean);
     if (this.leviMode) {
-      // 短拍：身體縮起慢轉蓄力；直衝：沿飛行方向像鑽頭一樣高速旋轉
+      // 兵長斬：以「身體自己的軸心」高速旋轉（軸心沿用出招當下身體的角度，和鋼索垂直或傾斜，不是順著鋼索鑽過去）
+      if (!this._leviLean) this._leviLean = this.body.quaternion.clone();
       this.leviAngle += dt * (this.leviMode === 2 ? Math.PI * 9 : Math.PI * 2.5);
-      const lv = this._leviVel;
-      if (this.leviMode === 2 && lv && lv.lengthSq() > 1) {
-        // 飛行方向轉到 root 的座標系（root 只有 yaw）
-        this._leviAxis.copy(lv).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw);
-        this._spinQ.setFromAxisAngle(this._leviAxis, this.leviAngle);
-      } else {
-        this._spinQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.leviAngle);
-      }
-      this.body.quaternion.premultiply(this._spinQ);
-      this.slashTimer = Math.max(this.slashTimer, 0.1);
-    }
-    const auraTarget = this.leviMode === 2 ? 0.55 : this.leviMode === 1 ? 0.35 + 0.15 * Math.sin(this.time * 30) : 0;
-    const am = this.aura.material;
-    am.opacity += (auraTarget - am.opacity) * Math.min(1, dt * 14);
-    this.aura.visible = am.opacity > 0.02;
-    this.aura.scale.setScalar(this.leviMode === 1 ? 1.25 : 1);
+      this._spinQ.setFromAxisAngle(_up, this.leviAngle);
+      this.body.quaternion.copy(this._leviLean).multiply(this._spinQ);
+    } else this._leviLean = null;
+    // 光暈＋全身發紅光：蓄力時脈動、直衝時最亮
+    const glow = this.leviMode === 2 ? 1 : this.leviMode === 1 ? 0.6 + 0.25 * Math.sin(this.time * 30) : 0;
+    this.leviGlow = (this.leviGlow || 0) + (glow - (this.leviGlow || 0)) * Math.min(1, dt * 14);
+    const lg = this.leviGlow;
+    this.aura.material.opacity = lg * 0.7;
+    this.aura.visible = lg > 0.02;
+    this.aura.scale.setScalar(1.3 + 0.15 * Math.sin(this.time * 40));
+    this.aura2.material.opacity = lg * 0.35;
+    this.aura2.visible = lg > 0.02;
+    this.aura2.scale.setScalar(2.2 + 0.3 * Math.sin(this.time * 23));
+    for (const m of this.bodyMats) m.emissive.setRGB(0.9 * lg, 0.06 * lg, 0.08 * lg);
     if (pc.flip && pc.flip.phase === 'tuck') {
       // 捲身翻轉：縮身往前翻一圈，翻完才爆衝
       const k = 1 - Math.max(0, pc.flip.t) / pc.flip.tuck;
@@ -361,6 +369,16 @@ export class PlayerModel {
       this.armR.sword.rotation.x = -0.7;
     }
 
+    // 兵長斬：雙手往兩側張開打直（刀和手臂連成一直線），雙腿併攏
+    if (this.leviMode) {
+      this.armL.shoulder.rotation.set(0, 0, -Math.PI / 2);
+      this.armR.shoulder.rotation.set(0, 0, Math.PI / 2);
+      this.armL.fore.rotation.x = this.armR.fore.rotation.x = 0;
+      L.hip.rotation.x = R.hip.rotation.x = 0.1;
+      L.knee.rotation.x = R.knee.rotation.x = -0.15;
+      this.slashTimer = 0;
+    }
+
     // 斬擊動作：雙臂由上往下交叉揮砍
     if (this.slashTimer > 0) {
       this.slashTimer -= dt;
@@ -375,11 +393,12 @@ export class PlayerModel {
 
     // 刀的方向：刀身與身體垂直（往兩側伸出、刀尖略朝外下、略往後），跟著身體傾斜；
     // 轉彎往內傾時，內側的刀尖會壓向地面。揮砍、迴旋、滑行時交給動作本身
-    const posing = this.slashTimer > 0 || this.spinTimer > 0 || this.leviMode || (pc.sliding && hs > 6);
+    const posing = this.slashTimer > 0 || this.spinTimer > 0 || (pc.sliding && hs > 6);
     if (!posing) {
       this.root.updateMatrixWorld(true);
-      const back = running ? 0.3 : airborne ? 0.45 : 0.15;
-      const down = running ? 0.32 : airborne ? 0.15 : 0.7;
+      // 兵長斬：刀身順著手臂往外（一直線）
+      const back = this.leviMode ? 0 : running ? 0.3 : airborne ? 0.45 : 0.15;
+      const down = this.leviMode ? 0 : running ? 0.32 : airborne ? 0.15 : 0.7;
       this.body.getWorldQuaternion(_bq);
       for (const [arm, sx] of [[this.armL, -1], [this.armR, 1]]) {
         _bd.set(sx, -down, back).normalize().applyQuaternion(_bq); // 身體座標 → 世界

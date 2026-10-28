@@ -745,7 +745,6 @@ export class Game {
       this.leviTitan = this.pc.hooks[side].object?.userData.titan || null;
       this.audio.play('ready');
       this.rig.kick(-5); // 短拍：鏡頭先往內收
-      this.hud.popup(innerWidth / 2, innerHeight * 0.38, '兵長斬', 'perfect');
     }
   }
 

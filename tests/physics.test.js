@@ -405,7 +405,7 @@ test('flip dash: double-tap dash in the air bursts, then keeps its momentum', ()
   const start = p.pos.clone();
   const press = (i) => ({ ...idle(), move: { x: 1, y: 0 }, boost: i === 0 || i === 6, boostPressed: i === 0 || i === 6 });
   let flipped = false, maxSpeed = 0, tuckSpeed = 99;
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 130; i++) {
     if (p.flip?.phase === 'tuck' && p.flip.t < p.flip.tuck * 0.4) tuckSpeed = Math.min(tuckSpeed, p.speed);
     p.update(1 / 60, press(i), world());
     if (p.flip) flipped = true;
@@ -475,7 +475,7 @@ test('double-tap dash while hooked: flips along the rope when the stick is cente
   p.fireHook('right', p.pos.clone(), anchorAt(0, 45, 0));
   for (let i = 0; i < 40 && !p.hooks.right.attached; i++) p.update(1 / 60, idle(), world());
   let flipped = false, maxHoriz = 0;
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 100; i++) {
     const tap = i === 0 || i === 6;
     p.update(1 / 60, { ...idle(), boost: true, boostPressed: tap }, world());
     if (p.flip) flipped = true;

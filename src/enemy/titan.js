@@ -545,9 +545,16 @@ export class Titan {
           // 預判玩家位置，撲過去（拋物線）
           _v.set(player.pos.x + player.vel.x * 0.35, 0, player.pos.z + player.vel.z * 0.35);
           _v2.set(_v.x - pos.x, 0, _v.z - pos.z);
-          const d = Math.min(_v2.length(), A.pounceRange * S * 1.2);
-          _v2.setLength(Math.max(1, d));
-          this.leap = { from: pos.clone(), to: pos.clone().add(_v2), t: 0, dur: A.leapTime, h: Math.max(6 * S, d * A.leapHeight) };
+          const d0 = Math.min(_v2.length(), A.pounceRange * S * 1.2);
+          _v2.setLength(Math.max(1, d0));
+          const to = pos.clone().add(_v2);
+          to.y = 0;
+          // 落點不超出地盤（不然落地後會被拉回原位）
+          const lim = (this.spawn.homeRadius ?? T.arenaRadius) * A.homeFactor;
+          _v.set(to.x - this.spawn.x, 0, to.z - this.spawn.z);
+          if (_v.length() > lim) to.set(this.spawn.x + _v.x * (lim / _v.length()), 0, this.spawn.z + _v.z * (lim / _v.length()));
+          const leap = this._planLeap(pos.clone(), to, world?.colliders || []);
+          this.leap = leap;
           this.leapHit = false;
           this.yaw = Math.atan2(_v2.x, _v2.z);
           this.setState('leap');
@@ -634,6 +641,36 @@ export class Titan {
   }
 
   /**
+   * 規劃飛撲路線：沿拋物線取樣，會撞到建築（建築頂比當下腳的高度高）就在撞到前落下。
+   * 跳得過矮房子，跳不過高樓。
+   */
+  _planLeap(from, to, colliders) {
+    const A = this.cfg.titan.abnormal;
+    const S = this.scale;
+    const r = 3.2 * S;
+    const full = Math.hypot(to.x - from.x, to.z - from.z);
+    const h = Math.max(6 * S, full * A.leapHeight);
+    const steps = Math.max(2, Math.ceil(full / 1.5));
+    let ok = 1;
+    for (let i = 1; i <= steps && ok === 1; i++) {
+      const u = i / steps;
+      const x = from.x + (to.x - from.x) * u, z = from.z + (to.z - from.z) * u;
+      const y = 4 * h * u * (1 - u);
+      for (const { min, max } of colliders) {
+        if (max.y < 6 || max.y < y + 0.5 || min.y > y + this.height) continue;
+        const cx = Math.max(min.x, Math.min(x, max.x)), cz = Math.max(min.z, Math.min(z, max.z));
+        if ((x - cx) ** 2 + (z - cz) ** 2 < r * r) {
+          ok = Math.max(0, (i - 1) / steps);
+          break;
+        }
+      }
+    }
+    const end = from.clone().lerp(to, ok);
+    const d = full * ok;
+    return { from, to: end, t: 0, dur: A.leapTime * Math.max(0.45, Math.sqrt(ok)), h: Math.max(3 * S, d * A.leapHeight) };
+  }
+
+  /**
    * 奇行種的移動：方向亂飄地狂奔，距離剛好就蹲低準備撲過去。回傳 true＝已處理（不走一般巨人的邏輯）
    */
   _abnormalMove(dt, player, aggro, dist, targetYaw) {
@@ -698,6 +735,7 @@ export class Titan {
     const r = 3.2 * this.scale;
     for (const { min, max } of colliders) {
       if (max.y < 6) continue; // 低矮物體略過
+      if (max.y < p.y + 0.5) continue; // 跳在屋頂上方：不擋
       if (min.y > this.height) continue; // 在頭頂上方的東西（例如樹冠）不擋路
       const cx = Math.max(min.x, Math.min(p.x, max.x));
       const cz = Math.max(min.z, Math.min(p.z, max.z));

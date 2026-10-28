@@ -340,6 +340,34 @@ function makeSwirl() {
   return m;
 }
 
+/** 雲帶貼圖：橫向（u）中間濃、兩邊淡；縱向（v）是一團一團的雲 */
+function cloudBandTexture() {
+  const W = 64, Hh = 256;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = Hh;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, W, Hh);
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 70; i++) {
+    const y = rnd() * Hh, x = W / 2 + (rnd() - 0.5) * W * 0.35, r = 10 + rnd() * 18;
+    for (const dy of [-Hh, 0, Hh]) {
+      const grad = g.createRadialGradient(x, y + dy, 0, x, y + dy, r);
+      grad.addColorStop(0, `rgba(255,255,255,${0.35 + rnd() * 0.3})`);
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = grad;
+      g.beginPath();
+      g.arc(x, y + dy, r, 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
 /**
  * 瓦斯軌跡線：身後兩條細長的白線（像飛機雲），停留幾秒、慢慢變寬變淡，把飛行路線畫在空中。
  * 面向鏡頭的帶子，中斷時（落地、停止噴氣）斷開不相連。
@@ -352,12 +380,15 @@ class TrailLines {
     const n = this.max * 2 * 2;
     this.pos = new Float32Array(n * 3);
     this.col = new Float32Array(n * 4);
+    this.uv = new Float32Array(n * 2);
     this.geo = new THREE.BufferGeometry();
     this.geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
     this.geo.setAttribute('color', new THREE.BufferAttribute(this.col, 4));
+    this.geo.setAttribute('uv', new THREE.BufferAttribute(this.uv, 2));
     this.idx = new Uint16Array(this.max * 2 * 6);
     this.geo.setIndex(new THREE.BufferAttribute(this.idx, 1));
-    this.mesh = new THREE.Mesh(this.geo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+    // 雲狀貼圖：橫向邊緣柔和、縱向一團一團（不是一條實線）
+    this.mesh = new THREE.Mesh(this.geo, new THREE.MeshBasicMaterial({ map: cloudBandTexture(), vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
     this.mesh.frustumCulled = false;
     scene.add(this.mesh);
   }
@@ -373,7 +404,9 @@ class TrailLines {
       if (emit) {
         if (tr.acc >= C.interval || !tr.on) {
           tr.acc = 0;
-          tr.pts.push({ p: sources[k].clone(), age: 0, brk: !tr.on });
+          const last = tr.pts[tr.pts.length - 1];
+          const dist = last && tr.on ? last.dist + last.p.distanceTo(sources[k]) : Math.random() * 10;
+          tr.pts.push({ p: sources[k].clone(), age: 0, brk: !tr.on, dist });
           if (tr.pts.length > this.max) tr.pts.shift();
         } else if (tr.pts.length) tr.pts[tr.pts.length - 1].p.copy(sources[k]); // 最新的點跟著噴口
       }
@@ -391,10 +424,13 @@ class TrailLines {
         _v2.subVectors(camera.position, a.p);
         _v.cross(_v2).normalize();
         const u = a.age / C.life;
-        const w = C.width * (1 + u * 2.5);
-        const alpha = C.alpha * (1 - u) * Math.min(1, a.age * 8 + 0.2);
+        const w = C.width * (1 + u * C.spread);
+        const alpha = C.alpha * (1 - u) * (1 - u * 0.3) * Math.min(1, a.age * 6 + 0.15);
         this.pos.set([a.p.x + _v.x * w, a.p.y + _v.y * w, a.p.z + _v.z * w, a.p.x - _v.x * w, a.p.y - _v.y * w, a.p.z - _v.z * w], v * 3);
-        this.col.set([1, 1, 1, alpha, 1, 1, 1, alpha], v * 4);
+        this.col.set([0.93, 0.95, 0.98, alpha, 0.93, 0.95, 0.98, alpha], v * 4);
+        // 沿著路徑的貼圖座標：跟著點走（雲團不會在帶子上滑動）
+        const tv = a.dist * 0.18;
+        this.uv.set([0, tv, 1, tv], v * 2);
         if (i > 0 && !a.brk) this.idx.set([v - 2, v - 1, v, v - 1, v + 1, v], ii), (ii += 6);
         v += 2;
       }
@@ -402,6 +438,7 @@ class TrailLines {
     this.geo.setDrawRange(0, ii);
     this.geo.attributes.position.needsUpdate = true;
     this.geo.attributes.color.needsUpdate = true;
+    this.geo.attributes.uv.needsUpdate = true;
     this.geo.index.needsUpdate = true;
     this.mesh.visible = ii > 0;
   }

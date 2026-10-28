@@ -300,7 +300,7 @@ try {
     for (const x of g.titans) x.attackCooldown = 99;
     t.attackCooldown = 0;
     const p = t.root.position;
-    g.pc.pos.set(p.x + t.forward.x * 24 * t.scale, 0.6, p.z + t.forward.z * 24 * t.scale);
+    g.pc.pos.set(p.x + t.forward.x * 16 * t.scale, 0.6, p.z + t.forward.z * 16 * t.scale); // 在牠的地盤內
     g.pc.vel.set(0, 0, 0);
     const states = [];
     let maxY = 0;
@@ -310,9 +310,10 @@ try {
       if (states[states.length - 1] !== t.state) states.push(t.state);
       maxY = Math.max(maxY, p.y);
     }
-    return { name: t.name, states, maxY: +maxY.toFixed(1), hurt: hp0 - g.pc.hp };
+    const home = Math.hypot(p.x - t.spawn.x, p.z - t.spawn.z) <= t.spawn.homeRadius * g.cfg.titan.abnormal.homeFactor + 0.01;
+    return { name: t.name, states, maxY: +maxY.toFixed(1), hurt: hp0 - g.pc.hp, home };
   });
-  check('abnormal titan crouches, pounces in an arc at the player, hits a player who stays put, and lands (staggered)', abn.states.includes('pounceWindup') && abn.states.includes('leap') && abn.states.includes('landed') && abn.maxY > 5 && abn.hurt > 0, JSON.stringify(abn));
+  check('abnormal titan crouches, pounces in an arc at the player, hits a player who stays put, lands inside its territory (staggered)', abn.states.includes('pounceWindup') && abn.states.includes('leap') && abn.states.includes('landed') && abn.maxY > 5 && abn.hurt > 0 && abn.home, JSON.stringify(abn));
 
   const parts = await page.evaluate(() => {
     const g = window.__game;
