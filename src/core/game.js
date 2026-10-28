@@ -1,6 +1,7 @@
 // 遊戲主控：建立各模組、處理輸入事件、主迴圈、戰鬥流程與遊戲狀態。
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { buildCity } from '../world/city.js';
 import { PlayerController } from '../player/playerController.js';
 import { PlayerModel } from '../player/playerModel.js';
@@ -80,6 +81,10 @@ export class Game {
     this.city = buildCity(this.scene, cfg.world, L.spawn, this.touch, L.map, clearings);
     this.pc = new PlayerController(cfg);
     this.model = new PlayerModel(this.scene);
+    // 刀身與裝置的金屬反光：用簡單的室內環境當反射來源（只套在角色的金屬上）
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    this.model.setEnvMap(pmrem.fromScene(new RoomEnvironment(), 0.04).texture);
+    pmrem.dispose();
     this.titans = L.titans.map((sp) => new Titan(this.scene, cfg, sp));
     this.titan = this.titans[0] || NO_TITAN; // 目前的目標巨人（離玩家最近、活著的）
     this.mission = new Mission(L, this.scene, this.touch);
@@ -1260,6 +1265,9 @@ export class Game {
     else if (pc.groundDashing) this.fx.gasTrail(pc.pos, pc.vel, 0.45);
     else if (pc.boosting || (flying && pc.anyAttached)) this.fx.gasTrail(pc.pos, pc.vel, 0.55);
     else if (flying && pc.feelSpeed > 30) this.fx.gasTrail(pc.pos, pc.vel, 0.2);
+    // 瓦斯軌跡線：空中、在噴氣或勾著飛（或高速）時拉出兩條細長白線
+    const trailEmit = !pc.grounded && (pc.boosting || pc.dashing || pc.flip?.phase === 'burst' || (pc.anyAttached && pc.feelSpeed > 14) || pc.feelSpeed > 30);
+    this.fx.updateTrailLines(dt, trailEmit, pc, this.model, this.camera);
     // 刀刃擦地／擦牆火花
     this._bladeSparks();
     // 鎖定繞圈、靠近巨人時：自動甩出連續的淡刀光
@@ -1502,6 +1510,23 @@ export class Game {
         break;
       case 'swipeHit':
         if (!this.grab) this.pc.damage(this.cfg.titan.swipeDamage, e.knock);
+        break;
+      case 'pounceWindup':
+        if (d < 90) {
+          this.audio.play('windup');
+          this.hud.toast(`⚠ ${titan.name}要撲過來了！`, 'warn', 1.0);
+        }
+        break;
+      case 'leap':
+        if (d < 90) this.audio.play('swing');
+        break;
+      case 'pounceHit':
+        if (!this.grab) this.pc.damage(this.cfg.titan.abnormal.damage, e.knock);
+        break;
+      case 'pounceLand':
+        if (d < 70) this.rig.addShake(0.5 * (1 - d / 70));
+        this.audio.play('land', { speed: 40 });
+        this.fx.dust(titan.root.position, _v.set(0, 0, 0), 30);
         break;
       case 'grabWindup':
         if (d < 70) {

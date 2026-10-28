@@ -24,7 +24,11 @@ export class PlayerModel {
     const boots = new THREE.MeshStandardMaterial({ color: '#2b211b', roughness: 0.6 });
     const cape = new THREE.MeshStandardMaterial({ color: '#2f5d3a', roughness: 0.9, side: THREE.DoubleSide });
     const metal = new THREE.MeshStandardMaterial({ color: '#a8b0b8', metalness: 0.85, roughness: 0.3 });
-    const blade = new THREE.MeshStandardMaterial({ color: '#dfe8f0', metalness: 0.9, roughness: 0.15, emissive: '#223344' });
+    const blade = new THREE.MeshStandardMaterial({ color: '#e6eef6', metalness: 0.95, roughness: 0.12, emissive: '#1a2533', envMapIntensity: 1.6 });
+    const leather = new THREE.MeshStandardMaterial({ color: '#3a2a1e', roughness: 0.75 });
+    const darkMetal = new THREE.MeshStandardMaterial({ color: '#4d555e', metalness: 0.8, roughness: 0.35 });
+    const edge = new THREE.MeshBasicMaterial({ color: '#dff4ff', transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.metalMats = [metal, blade, darkMetal];
     const hair = new THREE.MeshStandardMaterial({ color: '#2a2018', roughness: 0.9 });
 
     this.root = new THREE.Group(); // 位置與朝向
@@ -51,9 +55,29 @@ export class PlayerModel {
     this.launcherL = mesh(new THREE.BoxGeometry(0.12, 0.16, 0.34), metal, 0.3, 0.05, 0);
     this.launcherR = mesh(new THREE.BoxGeometry(0.12, 0.16, 0.34), metal, -0.3, 0.05, 0);
     this.hips.add(this.launcherL, this.launcherR);
-    // 背後氣罐
-    const tank = new THREE.CylinderGeometry(0.07, 0.07, 0.5, 8).rotateX(Math.PI / 2);
-    this.hips.add(mesh(tank, metal, 0.24, -0.02, 0.1), mesh(tank, metal, -0.24, -0.02, 0.1));
+    // 立體機動裝置：腰後兩側的氣罐（含閥門）＋刀箱、腰間鋼索盒的捲筒與噴嘴
+    const tank = new THREE.CylinderGeometry(0.085, 0.085, 0.56, 10).rotateX(Math.PI / 2);
+    const tankCap = new THREE.SphereGeometry(0.085, 8, 6);
+    for (const sx of [1, -1]) {
+      this.hips.add(mesh(tank, metal, 0.27 * sx, 0.14, 0.16));
+      this.hips.add(mesh(tankCap, metal, 0.27 * sx, 0.14, 0.44), mesh(tankCap, metal, 0.27 * sx, 0.14, -0.12));
+      this.hips.add(mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.1, 6), darkMetal, 0.27 * sx, 0.24, 0.3)); // 閥門
+      this.hips.add(mesh(new THREE.BoxGeometry(0.13, 0.24, 0.62), darkMetal, 0.36 * sx, -0.08, 0.1)); // 刀箱
+      this.hips.add(mesh(new THREE.BoxGeometry(0.135, 0.03, 0.63), leather, 0.36 * sx, 0.0, 0.1)); // 刀箱綁帶
+      // 鋼索盒的捲筒＋往前的噴嘴
+      this.hips.add(mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.07, 12).rotateZ(Math.PI / 2), darkMetal, 0.37 * sx, 0.05, -0.02));
+      this.hips.add(mesh(new THREE.ConeGeometry(0.035, 0.12, 6).rotateX(-Math.PI / 2), darkMetal, 0.3 * sx, 0.05, -0.22));
+    }
+    // 皮帶：胸前 X 字、肩帶、腰帶
+    for (const sx of [1, -1]) {
+      const strap = mesh(new THREE.BoxGeometry(0.05, 0.62, 0.03), leather, 0.06 * sx, 0.42, -0.2);
+      strap.rotation.z = 0.55 * sx;
+      this.hips.add(strap);
+      const back = mesh(new THREE.BoxGeometry(0.05, 0.62, 0.03), leather, 0.06 * sx, 0.42, 0.2);
+      back.rotation.z = -0.55 * sx;
+      this.hips.add(back);
+    }
+    this.hips.add(mesh(new THREE.TorusGeometry(0.215, 0.025, 6, 16).rotateX(Math.PI / 2), leather, 0, 0.14, 0));
 
     // 手臂（肩膀為關節）
     const makeArm = (sx) => {
@@ -65,9 +89,15 @@ export class PlayerModel {
       fore.add(mesh(new THREE.CapsuleGeometry(0.055, 0.24, 4, 6), skin, 0, -0.14, 0));
       const sword = new THREE.Group();
       sword.position.y = -0.3;
-      sword.add(mesh(new THREE.BoxGeometry(0.05, 0.1, 0.08), metal, 0, 0, 0));
-      const b = mesh(new THREE.BoxGeometry(0.015, 0.06, 0.9), blade, 0, 0, -0.48);
+      // 握把（扳機、護手）＋刀身＋刀刃反光條
+      sword.add(mesh(new THREE.BoxGeometry(0.06, 0.12, 0.16), darkMetal, 0, 0, 0.02));
+      sword.add(mesh(new THREE.BoxGeometry(0.02, 0.05, 0.05), metal, 0, -0.08, -0.02));
+      sword.add(mesh(new THREE.BoxGeometry(0.09, 0.03, 0.03), metal, 0, 0, -0.07));
+      const b = mesh(new THREE.BoxGeometry(0.015, 0.07, 0.95), blade, 0, 0, -0.55);
       sword.add(b);
+      const e = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.012, 0.93), edge);
+      e.position.set(0, 0.036, -0.55);
+      sword.add(e);
       fore.add(sword);
       shoulder.add(upper, fore);
       this.hips.add(shoulder);
@@ -88,6 +118,9 @@ export class PlayerModel {
       knee.position.y = -0.45;
       knee.add(mesh(new THREE.CapsuleGeometry(0.07, 0.3, 4, 6), boots, 0, -0.2, 0));
       hip.add(knee);
+      // 大腿綁帶
+      hip.add(mesh(new THREE.TorusGeometry(0.085, 0.018, 6, 14).rotateX(Math.PI / 2), leather, 0, -0.18, 0));
+      hip.add(mesh(new THREE.TorusGeometry(0.08, 0.018, 6, 14).rotateX(Math.PI / 2), leather, 0, -0.32, 0));
       this.hips.add(hip);
       return { hip, knee };
     };
@@ -153,6 +186,14 @@ export class PlayerModel {
   startSlash() {
     this.slashTimer = 0.28;
     this.slashSide *= -1;
+  }
+
+  /** 金屬（刀身、裝置）的環境反射貼圖 */
+  setEnvMap(tex) {
+    for (const m of this.metalMats) {
+      m.envMap = tex;
+      m.needsUpdate = true;
+    }
   }
 
   /** faceYaw：指定身體朝向（鎖定鏡頭時朝向目標），null＝照移動方向 */
@@ -352,17 +393,39 @@ export class PlayerModel {
       if (pc.sliding && hs > 6) this.armR.sword.rotation.x = -0.7;
     }
 
-    // 披風隨速度飄動
+    // 披風：每一列是一個有彈性的擺（越下面越慢），被速度吹向後方、被側向移動吹向側邊、下墜時往上飄
     const pos = this.cape.geometry.attributes.position;
     const base = this.capeBase;
     const flutter = Math.min(1, speed / 35);
+    const fwdX = -Math.sin(this.yaw), fwdZ = -Math.cos(this.yaw);
+    const fs = v.x * fwdX + v.z * fwdZ; // 往前的速度
+    const ls = v.x * -fwdZ + v.z * fwdX; // 往右的速度
+    const cs = this.capeSim || (this.capeSim = { back: new Float32Array(8), side: new Float32Array(8), lift: new Float32Array(8), vb: new Float32Array(8), vs: new Float32Array(8), vl: new Float32Array(8) });
+    const sdt = Math.min(dt, 1 / 30);
+    for (let r = 0; r < 8; r++) {
+      const d = r / 7;
+      const k = 70 / (1 + r * 0.7);
+      const c = 2 * Math.sqrt(k) * 0.35; // 欠阻尼：會擺動
+      const tb = d * (0.12 + Math.max(0, Math.min(1, (Math.abs(fs) + Math.abs(v.y) * 0.5) / 35)) * 0.95);
+      const ts = -Math.max(-1, Math.min(1, ls / 25)) * 0.45 * d;
+      const tl = Math.max(0, Math.min(1, -v.y / 30)) * 0.5 * d;
+      cs.vb[r] += (k * (tb - cs.back[r]) - c * cs.vb[r]) * sdt;
+      cs.vs[r] += (k * (ts - cs.side[r]) - c * cs.vs[r]) * sdt;
+      cs.vl[r] += (k * (tl - cs.lift[r]) - c * cs.vl[r]) * sdt;
+      cs.back[r] += cs.vb[r] * sdt;
+      cs.side[r] += cs.vs[r] * sdt;
+      cs.lift[r] += cs.vl[r] * sdt;
+    }
     for (let i = 0; i < pos.count; i++) {
       const by = base[i * 3 + 1];
       const bx = base[i * 3];
-      const d = -by; // 0（上）~ 0.85（下）
-      const wave = Math.sin(t * (8 + flutter * 14) + d * 7 + bx * 3) * 0.05 * (0.3 + flutter) * d;
-      const back = d * (0.15 + flutter * 0.9);
-      pos.setXYZ(i, bx, by + back * 0.5 * flutter, back + wave);
+      const d = -by / 0.85; // 0（上）~ 1（下）
+      const rf = Math.min(6.999, d * 7);
+      const r0 = Math.floor(rf), u = rf - r0;
+      const lerp = (a) => a[r0] + (a[r0 + 1] - a[r0]) * u;
+      const back = lerp(cs.back), side = lerp(cs.side), lift = lerp(cs.lift);
+      const wave = Math.sin(t * (8 + flutter * 14) + d * 6 + bx * 3) * 0.05 * (0.3 + flutter) * d;
+      pos.setXYZ(i, bx + side, by + back * 0.45 + lift, back + wave);
     }
     pos.needsUpdate = true;
     this.cape.geometry.computeVertexNormals();

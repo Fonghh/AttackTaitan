@@ -281,6 +281,38 @@ try {
     return out;
   });
   check('5 titans: some between buildings, a pair close together, varied sizes', multi.count === 5 && multi.outsidePlaza >= 3 && multi.minPair < 70 && Math.max(...multi.heights) >= 30, JSON.stringify(multi));
+  // 巨人外觀各不相同；奇行種：狂奔 → 蹲低 → 飛撲（拋物線）→ 落地硬直；瓦斯軌跡線
+  const looks = await page.evaluate(() => {
+    const g = window.__game;
+    const ls = g.titans.map((t) => `${t.look.body}/${t.look.face}/${t.look.hair}/${t.look.tint}`);
+    const meshes = g.titans[0].root.children.length;
+    let count = 0;
+    g.titans[0].root.traverse((o) => o.isMesh && count++);
+    return { distinct: new Set(ls).size, total: ls.length, meshesPerTitan: count };
+  });
+  check('titans look different from each other (body/face/hair/skin), parts merged for performance', looks.distinct === looks.total && looks.meshesPerTitan < 40, JSON.stringify(looks));
+  const abn = await page.evaluate(() => {
+    const g = window.__game;
+    g.restart(true);
+    g.renderer.setAnimationLoop(null);
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    const t = g.titans.find((x) => x.kind === 'abnormal');
+    for (const x of g.titans) x.attackCooldown = 99;
+    t.attackCooldown = 0;
+    const p = t.root.position;
+    g.pc.pos.set(p.x + t.forward.x * 24 * t.scale, 0.6, p.z + t.forward.z * 24 * t.scale);
+    g.pc.vel.set(0, 0, 0);
+    const states = [];
+    let maxY = 0;
+    const hp0 = g.pc.hp;
+    for (let i = 0; i < 200; i++) {
+      g.step(1 / 60, base());
+      if (states[states.length - 1] !== t.state) states.push(t.state);
+      maxY = Math.max(maxY, p.y);
+    }
+    return { name: t.name, states, maxY: +maxY.toFixed(1), hurt: hp0 - g.pc.hp };
+  });
+  check('abnormal titan crouches, pounces in an arc at the player, hits a player who stays put, and lands (staggered)', abn.states.includes('pounceWindup') && abn.states.includes('leap') && abn.states.includes('landed') && abn.maxY > 5 && abn.hurt > 0, JSON.stringify(abn));
 
   const parts = await page.evaluate(() => {
     const g = window.__game;

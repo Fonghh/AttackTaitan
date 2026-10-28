@@ -224,6 +224,24 @@ export const CONFIG = {
     grabHoldTime: 2.6, // 被抓住後幾秒沒掙脫就被捏
     grabEscapeTaps: 5, // 連打斬擊幾次掙脫
     crushDamage: 45,
+    // 奇行種：跑得快、方向亂飄、蹲低後朝玩家撲過去（撲擊途中撞到就受傷）
+    abnormal: {
+      runSpeed: 9, // m/s × 體型（一般巨人走路 3.2）
+      turnRate: 2.2,
+      wobble: 0.7, // 跑步時方向左右亂飄的幅度（弧度）
+      homeFactor: 2, // 地盤範圍 × 這個倍數（比較會追出去）
+      pounceRange: 34, // 距離這麼近（× 體型）就可能撲過來
+      pounceMin: 7,
+      pounceMaxHeight: 1.4, // 玩家高度 ≤ 巨人身高 × 這個倍數才撲
+      windup: 0.65, // 蹲低預備（有警告）
+      leapTime: 0.95,
+      leapHeight: 0.4, // 拋物線高度 = 距離 × 此值
+      hitRadius: 4.2, // 撲擊途中，胸口／頭離玩家這麼近（× 體型）＝撞到
+      damage: 30,
+      knock: 26,
+      recover: 1.4, // 落地後的硬直（趁機砍）
+      cooldown: 4,
+    },
     // 死亡後屍體淡出
     fadeDelay: 3,
     fadeTime: 2,
@@ -232,11 +250,11 @@ export const CONFIG = {
 
   // 巨人配置：廣場一隻、大樓間街道上各處，其中兩隻成對在附近
   titans: [
-    { name: '廣場巨人', x: 0, z: -10, yaw: 0.15, scale: 1.0, homeRadius: 40 },
-    { name: '西街巨人', x: -100, z: 50, yaw: 1.2, scale: 1.3, homeRadius: 12 },
-    { name: '東街巨人 A', x: 100, z: -50, yaw: -1.4, scale: 1.15, homeRadius: 12, tint: '#c98f74' },
-    { name: '東街巨人 B', x: 100, z: -100, yaw: -1.0, scale: 1.45, homeRadius: 12, tint: '#b98670', hair: '#1f1712' },
-    { name: '南巷大巨人', x: -100, z: -100, yaw: 0.6, scale: 1.6, homeRadius: 10, tint: '#ddb090' },
+    { name: '廣場巨人', x: 0, z: -10, yaw: 0.15, scale: 1.0, homeRadius: 40, look: { body: 'normal', girth: 1, torso: 1, belly: 1, face: 'angry', hair: 'short', tint: '#d39a7c', hairColor: '#3a2a1f' } },
+    { name: '西街奇行種', kind: 'abnormal', x: -100, z: 50, yaw: 1.2, scale: 1.3, homeRadius: 12 },
+    { name: '東街巨人 A', x: 100, z: -50, yaw: -1.4, scale: 1.15, homeRadius: 12, look: { body: 'stocky', girth: 1.25, torso: 1.15, belly: 1.3, face: 'blank', hair: 'bald', tint: '#c98f6f' } },
+    { name: '東街巨人 B', x: 100, z: -100, yaw: -1.0, scale: 1.45, homeRadius: 12, look: { body: 'lanky', girth: 0.78, torso: 0.86, belly: 1, face: 'grin', hair: 'long', tint: '#e2b190', hairColor: '#c9a25a' } },
+    { name: '南巷大巨人', x: -100, z: -100, yaw: 0.6, scale: 1.6, homeRadius: 10, look: { body: 'normal', girth: 1.05, torso: 1.05, belly: 1, face: 'grin', hair: 'messy', tint: '#b9805f', hairColor: '#1e1a17' } },
   ],
 
   camera: {
@@ -292,6 +310,9 @@ export const CONFIG = {
     hookFollowRate: 3.0,
     hookFollowAfter: 0.8, // 放索後繼續跟隨幾秒
   },
+
+  // 瓦斯軌跡線：飛行時身後兩條細長白線，停留數秒（像飛機雲）
+  trailLines: { life: 3.5, interval: 0.035, width: 0.045, alpha: 0.75 },
 
   speedLines: {
     // 速度線濃度（暫停選單切換）：數量與亮度倍率

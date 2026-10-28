@@ -340,6 +340,77 @@ function makeSwirl() {
   return m;
 }
 
+/**
+ * 瓦斯軌跡線：身後兩條細長的白線（像飛機雲），停留幾秒、慢慢變寬變淡，把飛行路線畫在空中。
+ * 面向鏡頭的帶子，中斷時（落地、停止噴氣）斷開不相連。
+ */
+class TrailLines {
+  constructor(scene, cfg) {
+    this.cfg = cfg;
+    this.max = Math.ceil(cfg.life / cfg.interval) + 2;
+    this.trails = [0, 1].map(() => ({ pts: [], acc: 0 }));
+    const n = this.max * 2 * 2;
+    this.pos = new Float32Array(n * 3);
+    this.col = new Float32Array(n * 4);
+    this.geo = new THREE.BufferGeometry();
+    this.geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    this.geo.setAttribute('color', new THREE.BufferAttribute(this.col, 4));
+    this.idx = new Uint16Array(this.max * 2 * 6);
+    this.geo.setIndex(new THREE.BufferAttribute(this.idx, 1));
+    this.mesh = new THREE.Mesh(this.geo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+    this.mesh.frustumCulled = false;
+    scene.add(this.mesh);
+  }
+
+  /** emit：這一幀有沒有在噴（沒有＝斷開）；sources：兩個噴口的世界座標 */
+  update(dt, emit, sources, camera) {
+    const C = this.cfg;
+    for (let k = 0; k < 2; k++) {
+      const tr = this.trails[k];
+      for (const p of tr.pts) p.age += dt;
+      while (tr.pts.length && tr.pts[0].age > C.life) tr.pts.shift();
+      tr.acc += dt;
+      if (emit) {
+        if (tr.acc >= C.interval || !tr.on) {
+          tr.acc = 0;
+          tr.pts.push({ p: sources[k].clone(), age: 0, brk: !tr.on });
+          if (tr.pts.length > this.max) tr.pts.shift();
+        } else if (tr.pts.length) tr.pts[tr.pts.length - 1].p.copy(sources[k]); // 最新的點跟著噴口
+      }
+      tr.on = emit;
+    }
+    // 建立面向鏡頭的帶子
+    let v = 0, ii = 0;
+    for (const tr of this.trails) {
+      const pts = tr.pts;
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i];
+        const b = pts[Math.min(pts.length - 1, i + 1)], o = pts[Math.max(0, i - 1)];
+        _v.subVectors(b.p, o.p);
+        if (_v.lengthSq() < 1e-8) _v.set(0, 0, 1);
+        _v2.subVectors(camera.position, a.p);
+        _v.cross(_v2).normalize();
+        const u = a.age / C.life;
+        const w = C.width * (1 + u * 2.5);
+        const alpha = C.alpha * (1 - u) * Math.min(1, a.age * 8 + 0.2);
+        this.pos.set([a.p.x + _v.x * w, a.p.y + _v.y * w, a.p.z + _v.z * w, a.p.x - _v.x * w, a.p.y - _v.y * w, a.p.z - _v.z * w], v * 3);
+        this.col.set([1, 1, 1, alpha, 1, 1, 1, alpha], v * 4);
+        if (i > 0 && !a.brk) this.idx.set([v - 2, v - 1, v, v - 1, v + 1, v], ii), (ii += 6);
+        v += 2;
+      }
+    }
+    this.geo.setDrawRange(0, ii);
+    this.geo.attributes.position.needsUpdate = true;
+    this.geo.attributes.color.needsUpdate = true;
+    this.geo.index.needsUpdate = true;
+    this.mesh.visible = ii > 0;
+  }
+
+  clear() {
+    for (const tr of this.trails) tr.pts.length = 0;
+  }
+}
+
 /** 刀光弧 */
 class SlashArcs {
   constructor(scene) {
@@ -499,6 +570,8 @@ export class Effects {
     this.smoke = new ParticlePool(scene, 1100, false);
     this.swirl = makeSwirl();
     scene.add(this.swirl);
+    this.trailLines = new TrailLines(scene, cfg.trailLines);
+    this._tsrc = [new THREE.Vector3(), new THREE.Vector3()];
     this.speedLines = new SpeedLines(scene, cfg.speedLines);
     this.ropes = { left: new RopeVisual(scene, '#9fb8c8'), right: new RopeVisual(scene, '#c8b89f') };
     this.slashes = new SlashArcs(scene);
@@ -761,7 +834,18 @@ export class Effects {
     }
   }
 
+  /** 瓦斯軌跡線：噴口在腰後兩側（氣罐的位置） */
+  updateTrailLines(dt, emit, pc, model, camera) {
+    const yaw = model.yaw;
+    const rx = Math.cos(yaw), rz = -Math.sin(yaw), fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    for (const [k, sx] of [[0, -1], [1, 1]]) {
+      this._tsrc[k].set(pc.pos.x + rx * 0.32 * sx - fx * 0.45, pc.pos.y + 0.1, pc.pos.z + rz * 0.32 * sx - fz * 0.45);
+    }
+    this.trailLines.update(dt, emit, this._tsrc, camera);
+  }
+
   reset() {
+    this.trailLines.clear();
     this.speedLines.clear();
     for (const p of this.glow.p) p.life = 0;
     for (const p of this.smoke.p) p.life = 0;

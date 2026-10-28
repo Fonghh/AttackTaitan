@@ -1,6 +1,7 @@
 // 巨型敵人：程序化模型、狀態機 AI（待機／追擊／揮擊／抓取／硬直／死亡）、後頸弱點，
 // 部位效果（砍眼睛＝暈眩、砍腳＝跪下）、地盤範圍與建築碰撞、死亡後淡出。
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -14,6 +15,45 @@ function part(geo, mat, x = 0, y = 0, z = 0) {
 }
 
 const easeInQuad = (t) => t * t;
+const _m4 = new THREE.Matrix4();
+const _e = new THREE.Euler();
+
+const SKINS = ['#d39a7c', '#c98f6f', '#e2b190', '#b9805f', '#d6a083', '#a87256', '#e8c0a0'];
+const HAIRS = ['#3a2a1f', '#1e1a17', '#6b4a2b', '#c9a25a', '#8a3b1e', '#cfc6b4'];
+
+function hashStr(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+/** 依名字＋位置決定外觀（每次載入都一樣、每隻不同）；spawn.look 的欄位優先 */
+function makeLook(spawn, kind, dummy) {
+  let seed = hashStr(`${spawn.name || ''}:${spawn.x}:${spawn.z}`);
+  const rnd = () => ((seed = Math.imul(seed ^ (seed >>> 15), 2246822507) ^ Math.imul(seed ^ (seed >>> 13), 3266489909)) >>> 0) / 4294967296;
+  const pick = (a) => a[Math.floor(rnd() * a.length) % a.length];
+  const body = pick(['normal', 'normal', 'lanky', 'stocky']);
+  let look = {
+    body,
+    girth: body === 'lanky' ? 0.78 : body === 'stocky' ? 1.25 : 1,
+    torso: body === 'lanky' ? 0.86 : body === 'stocky' ? 1.15 : 1,
+    belly: body === 'stocky' ? 1.3 : 1,
+    headScale: 0.95 + rnd() * 0.15,
+    eyeSize: 1,
+    face: pick(['grin', 'grin', 'blank', 'angry']),
+    hair: pick(['short', 'long', 'bald', 'messy']),
+    tint: pick(SKINS),
+    hairColor: pick(HAIRS),
+  };
+  if (kind === 'abnormal') {
+    // 奇行種：瘦長、大頭、大眼、咧嘴笑
+    Object.assign(look, { body: 'lanky', girth: 0.72, torso: 0.82, belly: 1, headScale: 1.3, eyeSize: 1.35, face: 'grin' });
+  }
+  if (dummy) Object.assign(look, { tint: '#a8764a', hair: 'bald', face: 'blank', hairColor: '#5a3a20', girth: 1, torso: 1, belly: 1 });
+  if (spawn.tint) look.tint = spawn.tint;
+  if (spawn.hair) look.hairColor = spawn.hair;
+  return Object.assign(look, spawn.look || {});
+}
 
 export class Titan {
   /**
@@ -24,20 +64,48 @@ export class Titan {
     this.spawn = spawn;
     this.scale = spawn.scale ?? 1;
     this.name = spawn.name ?? '巨人';
-    // 每隻巨人自己的材質（受擊閃白、死亡淡出不會互相影響）
-    // 訓練用木人：木頭色、不會動、不會死（被砍到剩 1 血後自動恢復）
-    this.dummy = !!spawn.dummy;
-    const tint = spawn.tint ?? (this.dummy ? '#a8764a' : '#d39a7c');
-    this.skin = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.75, flatShading: true, emissive: '#000000' });
-    const dark = new THREE.MeshStandardMaterial({ color: new THREE.Color(tint).multiplyScalar(0.78), roughness: 0.8, flatShading: true });
-    const hairMat = new THREE.MeshStandardMaterial({ color: spawn.hair ?? '#3a2a1f', roughness: 1, flatShading: true });
+    // 外觀：依名字與位置決定（固定、每隻不同），spawn.look 可以指定
+    this.kind = spawn.kind ?? 'normal'; // 'normal' | 'abnormal'（奇行種）
+    this.dummy = !!spawn.dummy; // 訓練用木人：木頭色、不會動、不會死（被砍到剩 1 血後自動恢復）
+    const look = (this.look = makeLook(spawn, this.kind, this.dummy));
+    const g = look.girth; // 四肢粗細
+    const gt = look.torso; // 軀幹寬度
+
+    // 每隻巨人自己的材質（受擊閃紅、死亡淡出不會互相影響）
+    const tint = look.tint;
+    this.skin = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.72, flatShading: true, emissive: '#000000' });
+    const shade = new THREE.MeshStandardMaterial({ color: new THREE.Color(tint).multiplyScalar(0.8), roughness: 0.8, flatShading: true });
+    const hairMat = new THREE.MeshStandardMaterial({ color: look.hairColor, roughness: 1, flatShading: true });
     this.eyeMat = new THREE.MeshStandardMaterial({ color: '#fff7d6', emissive: '#ffd27a', emissiveIntensity: 0.6 });
+    const socketMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(tint).multiplyScalar(0.45), roughness: 1, flatShading: true });
     const mouthMat = new THREE.MeshStandardMaterial({ color: '#3b1414', roughness: 1 });
     const toothMat = new THREE.MeshStandardMaterial({ color: '#f1ead8', roughness: 0.6 });
     this.napeMat = new THREE.MeshStandardMaterial({ color: '#ff6a2a', emissive: '#ff4a10', emissiveIntensity: 1.6, roughness: 0.4 });
     this.handMatR = this.skin.clone();
     this.handMatL = this.skin.clone();
-    this.materials = [this.skin, dark, hairMat, this.eyeMat, mouthMat, toothMat, this.napeMat, this.handMatR, this.handMatL];
+    this.materials = [this.skin, shade, hairMat, this.eyeMat, socketMat, mouthMat, toothMat, this.napeMat, this.handMatR, this.handMatL];
+
+    // 同一個關節、同一種材質的零件合併成一個網格（手機上 draw call 少很多）
+    const bins = new Map();
+    const add = (group, geo, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) => {
+      const gg = geo.index ? geo : geo.toNonIndexed();
+      _m4.makeRotationFromEuler(_e.set(rx, ry, rz)).setPosition(x, y, z);
+      gg.applyMatrix4(_m4);
+      const key = group.uuid + mat.uuid;
+      if (!bins.has(key)) bins.set(key, { group, mat, geos: [] });
+      bins.get(key).geos.push(gg);
+    };
+    const flush = () => {
+      for (const { group, mat, geos } of bins.values()) {
+        for (const gg of geos) for (const k of Object.keys(gg.attributes)) if (!['position', 'normal', 'uv'].includes(k)) gg.deleteAttribute(k);
+        const m = new THREE.Mesh(mergeGeometries(geos), mat);
+        m.castShadow = m.receiveShadow = true;
+        group.add(m);
+      }
+      bins.clear();
+    };
+    const sph = (r, ws = 10, hs = 8) => new THREE.SphereGeometry(r, ws, hs);
+    const cap = (r, l) => new THREE.CapsuleGeometry(r, l, 4, 8);
 
     this.root = new THREE.Group();
     this.root.scale.setScalar(this.scale);
@@ -46,18 +114,22 @@ export class Titan {
     this.pelvis = new THREE.Group();
     this.pelvis.position.y = 9;
     this.fall.add(this.pelvis);
-    this.pelvis.add(part(new THREE.SphereGeometry(2.4, 10, 8).scale(1.15, 0.8, 0.9), this.skin));
+    add(this.pelvis, sph(2.4).scale(1.15 * gt, 0.8, 0.9 * gt), this.skin);
 
     const leg = (sx) => {
       const hip = new THREE.Group();
       hip.position.set(1.4 * sx, -0.4, 0);
-      hip.add(part(new THREE.CapsuleGeometry(1.15, 3.0, 4, 8), this.skin, 0, -2.2, 0));
       const knee = new THREE.Group();
       knee.position.y = -4.4;
-      knee.add(part(new THREE.CapsuleGeometry(0.95, 3.0, 4, 8), this.skin, 0, -2.1, 0));
-      knee.add(part(new THREE.BoxGeometry(1.7, 0.7, 2.8), this.skin, 0, -4.0, 0.6));
       hip.add(knee);
       this.pelvis.add(hip);
+      add(hip, cap(1.15 * g, 3.0), this.skin, 0, -2.2, 0);
+      add(hip, sph(1.0 * g, 8, 6).scale(1, 1.6, 0.8), shade, 0.15 * sx, -2.0, 0.55 * g); // 大腿前側肌肉
+      add(knee, sph(0.55 * g, 8, 6), shade, 0, 0.1, 0.75 * g); // 膝蓋骨
+      add(knee, cap(0.95 * g, 3.0), this.skin, 0, -2.1, 0);
+      add(knee, sph(0.85 * g, 8, 6).scale(1, 1.5, 0.9), shade, 0, -1.4, -0.45 * g); // 小腿肚
+      add(knee, new THREE.BoxGeometry(1.7 * g, 0.7, 2.8), this.skin, 0, -4.0, 0.6);
+      for (let i = 0; i < 4; i++) add(knee, sph(0.22, 6, 4), this.skin, (-0.55 + i * 0.37) * g, -4.15, 2.0); // 腳趾
       return { hip, knee };
     };
     this.legL = leg(1);
@@ -66,29 +138,42 @@ export class Titan {
     this.spine = new THREE.Group();
     this.spine.position.y = 0.6;
     this.pelvis.add(this.spine);
-    this.spine.add(part(new THREE.CapsuleGeometry(2.3, 2.4, 4, 10).scale(1.15, 1, 0.8), this.skin, 0, 2.4, 0));
+    add(this.spine, cap(2.3, 2.4).scale(1.15 * gt * look.belly, 1, 0.8 * look.belly), this.skin, 0, 2.4, 0);
     this.chest = new THREE.Group();
     this.chest.position.y = 4.6;
     this.spine.add(this.chest);
-    this.chest.add(part(new THREE.SphereGeometry(2.9, 12, 10).scale(1.2, 0.85, 0.85), this.skin, 0, 0.6, 0));
-    // 胸肌、腹肌輪廓
-    this.chest.add(part(new THREE.BoxGeometry(2.2, 1.4, 0.6), dark, 1.2, 0.6, 2.2), part(new THREE.BoxGeometry(2.2, 1.4, 0.6), dark, -1.2, 0.6, 2.2));
-    for (let i = 0; i < 3; i++) {
-      this.spine.add(part(new THREE.BoxGeometry(1.0, 0.7, 0.4), dark, 0.6, 1.0 + i * 0.95, 1.85), part(new THREE.BoxGeometry(1.0, 0.7, 0.4), dark, -0.6, 1.0 + i * 0.95, 1.85));
+    add(this.chest, sph(2.9, 12, 10).scale(1.2 * gt, 0.85, 0.85 * gt), this.skin, 0, 0.6, 0);
+    // 胸肌、鎖骨
+    for (const sx of [1, -1]) {
+      add(this.chest, sph(1.4, 10, 6).scale(1.2 * gt, 0.55, 0.3), shade, 1.15 * sx * gt, 0.75, 2.15 * gt);
+      add(this.chest, cap(0.18, 2.0), shade, 1.25 * sx * gt, 1.75, 1.75 * gt, 0, 0, Math.PI / 2 - 0.25 * sx);
     }
+    // 腹肌（六塊）＋肚臍
+    if (look.belly < 1.2) {
+      for (let i = 0; i < 3; i++) {
+        for (const sx of [1, -1]) add(this.spine, new THREE.BoxGeometry(0.9, 0.72, 0.3), shade, 0.52 * sx * gt, 1.05 + i * 0.9, 1.78 * gt);
+      }
+    }
+    add(this.spine, sph(0.16, 6, 4), socketMat, 0, 0.55, 1.9 * gt * look.belly);
 
     const arm = (sx, handMat) => {
       const shoulder = new THREE.Group();
       shoulder.position.set(3.4 * sx, 1.2, 0);
-      shoulder.add(part(new THREE.SphereGeometry(1.3, 8, 6), this.skin));
-      shoulder.add(part(new THREE.CapsuleGeometry(0.9, 2.6, 4, 8), this.skin, 0, -2.1, 0));
       const elbow = new THREE.Group();
       elbow.position.y = -4.1;
-      elbow.add(part(new THREE.CapsuleGeometry(0.8, 2.6, 4, 8), this.skin, 0, -1.9, 0));
-      const hand = part(new THREE.SphereGeometry(1.2, 8, 6).scale(1, 1.3, 0.7), handMat, 0, -4.2, 0);
-      elbow.add(hand);
       shoulder.add(elbow);
       this.chest.add(shoulder);
+      add(shoulder, sph(1.3 * g, 8, 6), this.skin); // 三角肌
+      add(shoulder, cap(0.9 * g, 2.6), this.skin, 0, -2.1, 0);
+      add(shoulder, sph(0.75 * g, 8, 6).scale(1, 1.4, 1), shade, 0, -1.7, 0.45 * g); // 二頭肌
+      add(elbow, cap(0.8 * g, 2.6), this.skin, 0, -1.9, 0);
+      add(elbow, sph(0.75 * g, 8, 6).scale(1, 1.3, 0.9), shade, 0, -0.9, 0.2 * g); // 前臂肌肉
+      const hand = new THREE.Mesh(sph(1.2, 8, 6).scale(1, 1.3, 0.7), handMat);
+      hand.position.set(0, -4.2, 0);
+      hand.castShadow = true;
+      elbow.add(hand);
+      for (let i = 0; i < 4; i++) add(elbow, cap(0.2, 0.9), handMat, (-0.6 + i * 0.4) * sx, -5.6, 0.15); // 手指
+      add(elbow, cap(0.22, 0.7), handMat, 0.95 * sx, -4.6, 0.5, 0.5, 0, 0.6 * sx); // 拇指
       return { shoulder, elbow, hand };
     };
     this.armL = arm(1, this.handMatL); // 巨人自己的左手（模型 +X）：抓取
@@ -97,17 +182,58 @@ export class Titan {
     this.neck = new THREE.Group();
     this.neck.position.y = 2.6;
     this.chest.add(this.neck);
-    this.neck.add(part(new THREE.CapsuleGeometry(1.05, 1.0, 4, 8), this.skin, 0, 0.6, 0));
+    add(this.neck, cap(1.05 * Math.min(1.15, g), 1.0), this.skin, 0, 0.6, 0);
     this.head = new THREE.Group();
     this.head.position.y = 1.9;
+    this.head.scale.setScalar(look.headScale);
     this.neck.add(this.head);
-    this.head.add(part(new THREE.SphereGeometry(1.75, 12, 10).scale(1, 1.15, 1.05), this.skin, 0, 0.6, 0));
-    this.head.add(part(new THREE.SphereGeometry(1.85, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.5).scale(1, 1.1, 1.1), hairMat, 0, 0.75, -0.1));
-    const eye = new THREE.SphereGeometry(0.32, 8, 6);
+    const H = this.head;
+    add(H, sph(1.75, 12, 10).scale(1, 1.15, 1.05), this.skin, 0, 0.6, 0);
+    add(H, sph(0.45, 6, 4).scale(0.5, 1, 0.8), this.skin, 1.72, 0.6, 0); // 耳朵
+    add(H, sph(0.45, 6, 4).scale(0.5, 1, 0.8), this.skin, -1.72, 0.6, 0);
+    add(H, new THREE.ConeGeometry(0.32, 0.8, 4).rotateX(Math.PI / 2 + 0.25), this.skin, 0, 0.35, 1.9); // 鼻子
+    add(H, sph(0.55, 8, 6).scale(1.4, 0.7, 0.6), this.skin, 0, -0.75, 1.45); // 下巴
+    // 眼窩（深色）＋眼睛（發光，eyeWorld 用）
+    for (const sx of [1, -1]) add(H, sph(0.46, 8, 6).scale(1.2, 0.85, 0.5), socketMat, 0.6 * sx, 0.85, 1.5);
+    const eye = new THREE.SphereGeometry(0.32 * look.eyeSize, 8, 6);
     this.eyes = [part(eye, this.eyeMat, 0.6, 0.85, 1.6), part(eye, this.eyeMat, -0.6, 0.85, 1.6)];
-    this.head.add(...this.eyes);
-    this.head.add(part(new THREE.BoxGeometry(1.9, 0.5, 0.4), mouthMat, 0, -0.1, 1.62));
-    this.head.add(part(new THREE.BoxGeometry(1.7, 0.18, 0.3), toothMat, 0, 0.06, 1.72));
+    H.add(...this.eyes);
+    // 眉毛：表情
+    const browTilt = look.face === 'angry' ? 0.38 : look.face === 'grin' ? -0.15 : 0.05;
+    const browY = look.face === 'grin' ? 1.38 : 1.25;
+    for (const sx of [1, -1]) add(H, new THREE.BoxGeometry(0.85, 0.16, 0.25), hairMat, 0.62 * sx, browY, 1.62, 0, 0, browTilt * sx);
+    // 嘴巴
+    if (look.face === 'grin') {
+      // 咧到耳邊的笑：沿著上揚的弧線排一排牙齒
+      const N = 9;
+      for (let i = 0; i < N; i++) {
+        const u = i / (N - 1) - 0.5;
+        const x = u * 2.6;
+        const y = -0.2 + u * u * 1.4;
+        const z = 1.62 - u * u * 0.9;
+        add(H, new THREE.BoxGeometry(0.34, 0.42, 0.25), mouthMat, x, y, z);
+        add(H, new THREE.BoxGeometry(0.24, 0.17, 0.2), toothMat, x, y + 0.1, z + 0.08);
+        add(H, new THREE.BoxGeometry(0.24, 0.15, 0.2), toothMat, x, y - 0.11, z + 0.08);
+      }
+    } else if (look.face === 'angry') {
+      add(H, new THREE.BoxGeometry(1.4, 0.75, 0.35), mouthMat, 0, -0.25, 1.6);
+      add(H, new THREE.BoxGeometry(1.25, 0.16, 0.25), toothMat, 0, 0.05, 1.72);
+      add(H, new THREE.BoxGeometry(1.25, 0.16, 0.25), toothMat, 0, -0.55, 1.72);
+    } else {
+      add(H, new THREE.BoxGeometry(1.3, 0.16, 0.3), mouthMat, 0, -0.2, 1.65);
+    }
+    // 頭髮
+    if (look.hair !== 'bald') add(H, new THREE.SphereGeometry(1.85, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.5).scale(1, 1.1, 1.1), hairMat, 0, 0.75, -0.1);
+    if (look.hair === 'long') {
+      add(H, new THREE.BoxGeometry(3.2, 3.2, 0.5), hairMat, 0, -0.4, -1.55);
+      for (const sx of [1, -1]) add(H, new THREE.BoxGeometry(0.5, 2.6, 1.6), hairMat, 1.75 * sx, -0.1, -0.3);
+    } else if (look.hair === 'messy') {
+      for (let i = 0; i < 9; i++) {
+        const a = (i / 9) * Math.PI * 2;
+        add(H, new THREE.ConeGeometry(0.45, 1.3, 5), hairMat, Math.sin(a) * 1.3, 2.25, Math.cos(a) * 1.1 - 0.2, Math.cos(a) * 0.7, 0, -Math.sin(a) * 0.7);
+      }
+    }
+    flush();
 
     // 弱點：後頸發光區（巨人面向 +Z，背後為 -Z）。不用點光源（多隻巨人時手機吃不消），靠自發光
     this.nape = part(new THREE.SphereGeometry(1, 16, 12).scale(1.0, 0.75, 0.45), this.napeMat, 0, 1.0, -0.95);
@@ -124,15 +250,17 @@ export class Titan {
     });
 
     // 碰撞球（相對各部位，半徑為未縮放值）
+    // 依體型調整：四肢 × 粗細、軀幹 × 寬度、頭 × 頭的大小
+    const hs = look.headScale;
     this.sphereDefs = [
-      [this.pelvis, 0, 0, 0, 2.5],
-      [this.spine, 0, 2.4, 0, 2.6],
-      [this.chest, 0, 0.6, 0, 3.0],
-      [this.head, 0, 0.6, 0, 1.9],
-      [this.legL.hip, 0, -2.2, 0, 1.3], [this.legR.hip, 0, -2.2, 0, 1.3],
-      [this.legL.knee, 0, -2.1, 0, 1.1], [this.legR.knee, 0, -2.1, 0, 1.1],
-      [this.armL.shoulder, 0, -2.1, 0, 1.0], [this.armR.shoulder, 0, -2.1, 0, 1.0],
-      [this.armL.elbow, 0, -1.9, 0, 0.9], [this.armR.elbow, 0, -1.9, 0, 0.9],
+      [this.pelvis, 0, 0, 0, 2.5 * gt],
+      [this.spine, 0, 2.4, 0, 2.6 * gt * look.belly],
+      [this.chest, 0, 0.6, 0, 3.0 * gt],
+      [this.head, 0, 0.6, 0, 1.9 * hs],
+      [this.legL.hip, 0, -2.2, 0, 1.3 * g], [this.legR.hip, 0, -2.2, 0, 1.3 * g],
+      [this.legL.knee, 0, -2.1, 0, 1.1 * g], [this.legR.knee, 0, -2.1, 0, 1.1 * g],
+      [this.armL.shoulder, 0, -2.1, 0, 1.0 * g], [this.armR.shoulder, 0, -2.1, 0, 1.0 * g],
+      [this.armL.elbow, 0, -1.9, 0, 0.9 * g], [this.armR.elbow, 0, -1.9, 0, 0.9 * g],
       [this.armL.elbow, 0, -4.2, 0, 1.3], [this.armR.elbow, 0, -4.2, 0, 1.3],
     ];
     this.spheres = this.sphereDefs.map(() => ({ center: new THREE.Vector3(), r: 0 }));
@@ -159,6 +287,8 @@ export class Titan {
     this.kneelTimer = 0; // 腳被砍：跪下
     this.kneelAmount = 0;
     this.regenTimer = 0;
+    this.leap = null;
+    this.leapHit = false;
     for (const w of this.wounds || []) w.mesh.parent?.remove(w.mesh);
     this.wounds = [];
     this.deadTime = 0;
@@ -332,6 +462,7 @@ export class Titan {
     switch (this.state) {
       case 'idle':
       case 'walk': {
+        if (this.kind === 'abnormal' && !kneeling && this._abnormalMove(dt, player, aggro, dist, targetYaw)) break;
         if (aggro) turn(T.turnRate * (kneeling ? 0.5 : 1));
         const reach = T.attackRange * S;
         const relH = player.pos.y / this.height;
@@ -405,6 +536,44 @@ export class Titan {
           this.attackCooldown = T.attackCooldown * 1.5;
         }
         break;
+      case 'pounceWindup': {
+        // 奇行種：蹲低預備，快速轉向玩家
+        const A = T.abnormal;
+        turn(A.turnRate * 1.5);
+        if (stunned) this.setState('idle');
+        else if (this.stateTime >= A.windup) {
+          // 預判玩家位置，撲過去（拋物線）
+          _v.set(player.pos.x + player.vel.x * 0.35, 0, player.pos.z + player.vel.z * 0.35);
+          _v2.set(_v.x - pos.x, 0, _v.z - pos.z);
+          const d = Math.min(_v2.length(), A.pounceRange * S * 1.2);
+          _v2.setLength(Math.max(1, d));
+          this.leap = { from: pos.clone(), to: pos.clone().add(_v2), t: 0, dur: A.leapTime, h: Math.max(6 * S, d * A.leapHeight) };
+          this.leapHit = false;
+          this.yaw = Math.atan2(_v2.x, _v2.z);
+          this.setState('leap');
+          this.events.push({ type: 'leap' });
+        }
+        break;
+      }
+      case 'leap': {
+        const L = this.leap;
+        L.t += dt;
+        const u = Math.min(1, L.t / L.dur);
+        pos.x = L.from.x + (L.to.x - L.from.x) * u;
+        pos.z = L.from.z + (L.to.z - L.from.z) * u;
+        pos.y = 4 * L.h * u * (1 - u);
+        if (u >= 1) {
+          pos.y = 0;
+          this.leap = null;
+          this.setState('landed');
+          this.attackCooldown = T.abnormal.cooldown;
+          this.events.push({ type: 'pounceLand' });
+        }
+        break;
+      }
+      case 'landed':
+        if (this.stateTime >= T.abnormal.recover) this.setState('idle');
+        break;
       case 'stagger':
         if (this.stateTime >= T.staggerTime) {
           this.setState('idle');
@@ -440,6 +609,19 @@ export class Titan {
         this.events.push({ type: 'swipeHit', knock: _v2.clone() });
       }
     }
+    // 奇行種撲擊：飛撲途中身體任何部位撞到玩家，或落地瞬間玩家在落點附近
+    if ((this.state === 'leap' || (this.state === 'landed' && this.stateTime < 0.1)) && !this.leapHit && player.hp > 0) {
+      let hit = this.spheres.some((sp) => sp.center.distanceTo(player.pos) < sp.r + 1.2 * S);
+      if (!hit && this.state === 'landed') {
+        hit = Math.hypot(player.pos.x - pos.x, player.pos.z - pos.z) < T.abnormal.hitRadius * S * 1.3 && player.pos.y < 6 * S;
+      }
+      if (hit) {
+        this.leapHit = true;
+        _v2.set(player.pos.x - pos.x, 0, player.pos.z - pos.z).normalize().multiplyScalar(T.abnormal.knock);
+        _v2.y = 10;
+        this.events.push({ type: 'pounceHit', knock: _v2.clone() });
+      }
+    }
     // 抓取判定（左手）
     if (this.state === 'grabReach' && player.hp > 0 && !player.grabbedBy) {
       const hand = this.armL.hand.getWorldPosition(_v);
@@ -449,6 +631,44 @@ export class Titan {
         this.events.push({ type: 'grabbed' });
       }
     }
+  }
+
+  /**
+   * 奇行種的移動：方向亂飄地狂奔，距離剛好就蹲低準備撲過去。回傳 true＝已處理（不走一般巨人的邏輯）
+   */
+  _abnormalMove(dt, player, aggro, dist, targetYaw) {
+    const T = this.cfg.titan;
+    const A = T.abnormal;
+    const S = this.scale;
+    const pos = this.root.position;
+    if (!aggro) return false;
+    const relH = player.pos.y / this.height;
+    if (this.attackCooldown <= 0 && dist < A.pounceRange * S && dist > A.pounceMin * S && relH < A.pounceMaxHeight) {
+      this.setState('pounceWindup');
+      this.events.push({ type: 'pounceWindup' });
+      return true;
+    }
+    if (dist < T.chaseDist * S * 0.5) return false; // 很近：用一般的揮擊／抓取
+    // 狂奔：方向左右亂飄
+    const t = performance.now() / 1000;
+    const wob = Math.sin(t * 1.9 + this.spawn.x * 0.37) * A.wobble * Math.min(1, dist / (40 * S));
+    let d = targetYaw + wob - this.yaw;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    this.yaw += Math.max(-A.turnRate * dt, Math.min(A.turnRate * dt, d));
+    if (this.state !== 'walk') this.setState('walk');
+    pos.x += Math.sin(this.yaw) * A.runSpeed * S * dt;
+    pos.z += Math.cos(this.yaw) * A.runSpeed * S * dt;
+    const hx = pos.x - this.spawn.x, hz = pos.z - this.spawn.z;
+    const hr = Math.hypot(hx, hz);
+    const lim = (this.spawn.homeRadius ?? T.arenaRadius) * A.homeFactor;
+    if (hr > lim) {
+      pos.x = this.spawn.x + (hx / hr) * lim;
+      pos.z = this.spawn.z + (hz / hr) * lim;
+    }
+    const prev = this.walkPhase;
+    this.walkPhase += (dt * 4.2) / Math.sqrt(S);
+    if (Math.floor(prev / Math.PI) !== Math.floor(this.walkPhase / Math.PI)) this.events.push({ type: 'step' });
+    return true;
   }
 
   /** 死亡後：先冒蒸氣躺著，再慢慢淡出消失 */
@@ -524,7 +744,42 @@ export class Titan {
     let armLX = 0.15, armLZ = 0.2, armRX = 0.15, armRZ = -0.2, elbowL = -0.3, elbowR = -0.3;
     let pelvisY = 9;
 
-    if (s === 'walk') {
+    let crouch = 0; // 奇行種蹲低（0～1）
+    if (s === 'walk' && this.kind === 'abnormal') {
+      // 奇行種狂奔：大步、上身前傾、手臂往後亂甩、頭歪來歪去
+      const ph = this.walkPhase;
+      legA = Math.sin(ph) * 0.85;
+      armLX = 0.9 + Math.sin(ph) * 0.7;
+      armRX = 0.9 - Math.sin(ph) * 0.7;
+      armLZ = 0.7;
+      armRZ = -0.7;
+      elbowL = elbowR = -0.2;
+      pelvisY = 9 - Math.abs(Math.cos(ph)) * 0.7;
+      spineX = 0.55;
+      neckX = -0.45;
+      neckY = Math.sin(t * 3.1) * 0.45;
+    } else if (s === 'pounceWindup') {
+      const p = Math.min(1, k / T.abnormal.windup);
+      crouch = p;
+      armLX = armRX = 1.3 * p;
+      armLZ = 0.5 * p;
+      armRZ = -0.5 * p;
+      spineX = 0.65 * p;
+      neckX = -0.5 * p;
+    } else if (s === 'leap') {
+      // 飛撲：雙手往前抓、腳縮起
+      armLX = armRX = -2.1;
+      armLZ = 0.25;
+      armRZ = -0.25;
+      elbowL = elbowR = -0.3;
+      spineX = 0.35;
+      neckX = -0.3;
+      crouch = 0.45;
+    } else if (s === 'landed') {
+      crouch = Math.max(0, 0.8 - k / T.abnormal.recover);
+      spineX = 0.5;
+      armLX = armRX = -0.5;
+    } else if (s === 'walk') {
       const ph = this.walkPhase;
       legA = Math.sin(ph) * 0.45;
       armLX = -Math.sin(ph) * 0.35;
@@ -600,8 +855,9 @@ export class Titan {
     // 跪下：骨盆下沉、大腿往前、小腿往後
     const kn = this.alive ? this.kneelAmount : 0;
     pelvisY -= kn * 4.2;
-    const hipK = -1.25 * kn;
-    const kneeK = 2.2 * kn;
+    const hipK = -1.25 * kn - 1.1 * crouch;
+    const kneeK = 2.2 * kn + 2.0 * crouch;
+    pelvisY -= crouch * 3.4;
     spineX += 0.35 * kn;
 
     this.pelvis.position.y = pelvisY;
