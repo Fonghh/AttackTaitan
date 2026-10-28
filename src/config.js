@@ -309,6 +309,8 @@ export const CONFIG = {
     hookFollow: true,
     hookFollowRate: 3.0,
     hookFollowAfter: 0.8, // 放索後繼續跟隨幾秒
+    // 鏡頭模式「緊貼背後」：鏡頭一直轉到角色面朝的方向（空中跟得很緊、地面慢一點，避免橫移時一直打轉）
+    behind: { airRate: 16, groundRate: 3, manualPause: 0.6 },
   },
 
   // 主角外觀（卡通畫風）：改這裡就能換造型

@@ -149,6 +149,13 @@ export class CameraRig {
       // 靠近巨人時往上仰（lowAngle 0～1）
       this.pitch += (C.followPitch + (opts.lowAngle || 0) * 0.34 - this.pitch) * k * 0.3;
     }
+    // 緊貼背後：轉到角色面朝的方向（手動轉視角後 manualPause 秒內不搶）
+    if (opts.behindYaw != null && this.time - this.lastManualLook > C.behind.manualPause) {
+      let d = opts.behindYaw - this.yaw;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      const rate = pc.grounded ? C.behind.groundRate : C.behind.airRate;
+      this.yaw += d * Math.min(1, rate * (opts.realDt ?? dt));
+    }
     const delay = opts.touch ? C.autoFollowDelayTouch : C.autoFollowDelayMouse;
     const fl = Math.hypot(this.followDir.x, this.followDir.z);
     if (!opts.lockTarget && opts.autoFollow && this.time - this.lastManualLook > delay && !pc.grounded && hs > 8 && fl > 0.3) {

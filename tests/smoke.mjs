@@ -723,6 +723,24 @@ try {
     g.pc.vel.set(30, 5, -20);
     for (let i = 0; i < 60; i++) g.step(1 / 60, base());
     cam.fixed = { dyaw: +Math.abs(g.rig.yaw - y0).toFixed(4), dpitch: +Math.abs(g.rig.pitch - p0).toFixed(4), roll: +g.rig.roll.toFixed(4), locked: g.rig.locked };
+    // 緊貼背後：勾著繞圈、放開後飛行，鏡頭方向一直貼著角色面朝的方向
+    g.camMode = 'behind';
+    g.pc.pos.set(nape.x + 30, nape.y + 4, nape.z + 15);
+    g.pc.vel.set(0, 0, 0);
+    g.pc.fireHook('right', g.pc.pos.clone(), { point: nape.clone(), object: mesh });
+    const angDiff = () => Math.abs(Math.atan2(Math.sin(g.rig.yaw - g.model.yaw), Math.cos(g.rig.yaw - g.model.yaw)));
+    const yb = g.rig.yaw;
+    let maxDiff = 0, turned = 0;
+    for (let i = 0; i < 120; i++) {
+      const prev = g.rig.yaw;
+      g.step(1 / 60, { ...base(), move: { x: 1, y: 0 } });
+      turned += Math.abs(Math.atan2(Math.sin(g.rig.yaw - prev), Math.cos(g.rig.yaw - prev)));
+      if (i > 40) maxDiff = Math.max(maxDiff, angDiff());
+    }
+    g.pc.releaseAll();
+    g.pc.vel.set(-25, 4, 25);
+    for (let i = 0; i < 40; i++) g.step(1 / 60, base());
+    cam.behind = { turned: +turned.toFixed(2), maxDiff: +maxDiff.toFixed(3), flyDiff: +angDiff().toFixed(3), moved: +Math.abs(g.rig.yaw - yb).toFixed(2) };
     g.camMode = 'follow';
     g.cameraFollow = true;
     const texts = [g.hud.el.mission.textContent];
@@ -734,6 +752,7 @@ try {
   check('[training] wooden dummies never die and heal back', training.survived && training.regen, JSON.stringify(training));
   check('[camera] hooked on a titan: camera locks on and banks into the orbit; hits leave wounds', training.cam.locked && Math.abs(training.cam.roll) > 0.05 && training.cam.wounds > 0, JSON.stringify(training.cam));
   check('[camera] fixed view: orbiting and flying never turn or bank the camera', training.cam.fixed.dyaw < 1e-3 && training.cam.fixed.dpitch < 1e-3 && Math.abs(training.cam.fixed.roll) < 0.01 && !training.cam.fixed.locked, JSON.stringify(training.cam.fixed));
+  check('[camera] behind view: camera stays behind the character while orbiting and flying', training.cam.behind.turned > 0.5 && training.cam.behind.maxDiff < 0.35 && training.cam.behind.flyDiff < 0.2, JSON.stringify(training.cam.behind));
   check('[training] finishing all 6 steps completes the level, shows stars and unlocks the next level', training.state === 'won' && /★/.test(training.stars || '') && training.next, JSON.stringify(training));
   const rings = await levelRun('rings', () => {
     const g = window.__game;
