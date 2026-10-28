@@ -1256,7 +1256,7 @@ export class Game {
     this.fx.update(dt, pc, this.model, this.camera);
     // 瓦斯雲軌跡：勾住飛行、噴氣、衝刺時身後拖出白色瓦斯（衝刺最濃）
     const flying = !pc.grounded && pc.feelSpeed > 14;
-    if (pc.dashing || pc.flip || pc.levi?.phase === 'dash') this.fx.gasTrail(pc.pos, pc.vel, 1);
+    if (pc.dashing || pc.flip?.phase === 'burst' || pc.levi?.phase === 'dash') this.fx.gasTrail(pc.pos, pc.vel, 1);
     else if (pc.groundDashing) this.fx.gasTrail(pc.pos, pc.vel, 0.45);
     else if (pc.boosting || (flying && pc.anyAttached)) this.fx.gasTrail(pc.pos, pc.vel, 0.55);
     else if (flying && pc.feelSpeed > 30) this.fx.gasTrail(pc.pos, pc.vel, 0.2);
@@ -1418,14 +1418,22 @@ export class Game {
         this._missionEvent('dashHold');
         this.audio.play('boost');
         break;
-      case 'flip':
+      case 'flip': // 捲身翻轉開始
         this._missionEvent('flip');
-        this.audio.play('boost');
         this.audio.play('swing');
-        this.rig.kick(10);
-        this.rig.addShake(0.2);
-        this.chroma = Math.max(this.chroma, 0.3);
-        this.fx.gasTrail(this.pc.pos, this.pc.vel, 1);
+        this.rig.addShake(0.12);
+        break;
+      case 'flipBurst': // 翻完 → 爆衝
+        this.audio.play('boost');
+        this.rig.kick(12);
+        this.rig.addShake(0.25);
+        this.chroma = Math.max(this.chroma, 0.35);
+        this.fx.gasPuff(this.pc.pos, this.pc.vel, true);
+        break;
+      case 'flipDetach': // 衝到勾點自動脫勾
+        this.audio.play('fling');
+        this.fx.gasPuff(this.pc.pos, this.pc.vel, true);
+        this.rig.addShake(0.15);
         break;
       case 'flipEnd':
         this.fx.gasPuff(this.pc.pos, this.pc.vel, true);

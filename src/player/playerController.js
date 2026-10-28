@@ -323,9 +323,32 @@ export class PlayerController {
     }
     if (this.flip) {
       const F = cfg.dash.flip;
-      this.flip.t -= dt;
-      this.vel.copy(this.flip.dir).multiplyScalar(this.flip.speed);
-      if (this.flip.t <= 0) {
+      const fl = this.flip;
+      fl.t -= dt;
+      if (fl.phase === 'tuck') {
+        // 捲身翻轉：空中幾乎停住、縮身翻一圈
+        this.vel.multiplyScalar(Math.exp(-8 * dt));
+        if (fl.t <= 0) {
+          fl.phase = 'burst';
+          fl.t = fl.time;
+          // 沿繩子衝的話，用現在的位置重新對準勾點
+          if (fl.alongRope && fl.hook?.attached) fl.hook.anchor(fl.dir).sub(this.pos).normalize();
+          this.emit('flipBurst', {});
+        }
+      } else {
+        this.vel.copy(fl.dir).multiplyScalar(fl.speed);
+        // 衝到勾點＝自動脫勾，帶著速度繼續往前衝
+        if (fl.hook?.attached) {
+          const d = this.pos.distanceTo(fl.hook.anchor(_anchor));
+          const past = d < F.detachDist * 2 && fl.dir.dot(_tmp.subVectors(_anchor, this.pos)) < 0;
+          if (d < F.detachDist || past) {
+            this.releaseHook(fl.hook.side);
+            fl.hook = null;
+            this.emit('flipDetach', {});
+          }
+        }
+      }
+      if (fl.phase === 'burst' && fl.t <= 0) {
         // 自動煞車＋短暫滯空，不會一路飛過頭
         this.vel.multiplyScalar(F.brake);
         if (F.hang > 0) this.hangTimer = F.hang;
@@ -561,6 +584,7 @@ export class PlayerController {
       const hk = this.hooks[side];
       if (hk.attached && !hk.slack) rope = hk;
     }
+    let alongRope = false;
     if (rope) {
       rope.anchor(_ropeDir).sub(this.pos).normalize();
       const mx = intent.move.x, my = intent.move.y;
@@ -568,7 +592,11 @@ export class PlayerController {
         _steer.copy(_right).addScaledVector(_ropeDir, -_right.dot(_ropeDir));
         if (_steer.lengthSq() > 1e-4) _steer.normalize();
         dir.copy(_ropeDir).multiplyScalar(my).addScaledVector(_steer, mx).normalize();
-      } else dir.copy(_ropeDir);
+        alongRope = my > 0.5 && Math.abs(mx) < 0.5;
+      } else {
+        dir.copy(_ropeDir);
+        alongRope = true;
+      }
     } else {
       if (_wish.lengthSq() > 0.04) dir.copy(_wish).normalize();
       else dir.copy(world.camForward);
@@ -584,7 +612,7 @@ export class PlayerController {
       hk.slackPeak = hk.slackStart = d;
       hk.pullOn = false;
     }
-    this.flip = { t: F.time, time: F.time, dir, speed: Math.max(this.speed, F.speed * Math.max(0.6, this.speedScale)) };
+    this.flip = { phase: 'tuck', t: F.tuck, tuck: F.tuck, time: F.time, dir, alongRope, hook: rope, speed: Math.max(this.speed, F.speed * Math.max(0.6, this.speedScale)) };
     this.flipCool = F.cooldown;
     this.gas = Math.max(0, this.gas - F.gas);
     this.emit('flip', {});

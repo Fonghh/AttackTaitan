@@ -220,9 +220,9 @@ export class PlayerModel {
     am.opacity += (auraTarget - am.opacity) * Math.min(1, dt * 14);
     this.aura.visible = am.opacity > 0.02;
     this.aura.scale.setScalar(this.leviMode === 1 ? 1.25 : 1);
-    if (pc.flip) {
-      // 翻轉衝刺：往前翻一圈
-      const k = 1 - pc.flip.t / pc.flip.time;
+    if (pc.flip && pc.flip.phase === 'tuck') {
+      // 捲身翻轉：縮身往前翻一圈，翻完才爆衝
+      const k = 1 - Math.max(0, pc.flip.t) / pc.flip.tuck;
       this._spinQ.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -k * Math.PI * 2);
       this.body.quaternion.premultiply(this._spinQ);
     }
@@ -266,7 +266,13 @@ export class PlayerModel {
       this.hips.position.y = 0.6;
       this.armL.shoulder.rotation.x = -0.6;
       this.armR.shoulder.rotation.x = -0.6;
-    } else if (airborne && (pc.dashing || pc.levi)) {
+    } else if (airborne && pc.flip?.phase === 'tuck') {
+      // 捲身：膝蓋抱到胸前、手臂收起
+      L.hip.rotation.x = R.hip.rotation.x = 1.9;
+      L.knee.rotation.x = R.knee.rotation.x = -2.3;
+      this.hips.position.y = 0.95;
+      this.armL.shoulder.rotation.x = this.armR.shoulder.rotation.x = 0.9;
+    } else if (airborne && (pc.dashing || pc.levi || pc.flip)) {
       // 衝刺：縮身前衝，雙刀往後拖
       L.hip.rotation.x = 1.05;
       R.hip.rotation.x = 0.85;

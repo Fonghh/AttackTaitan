@@ -478,6 +478,7 @@ export class Titan {
     const r = 3.2 * this.scale;
     for (const { min, max } of colliders) {
       if (max.y < 6) continue; // 低矮物體略過
+      if (min.y > this.height) continue; // 在頭頂上方的東西（例如樹冠）不擋路
       const cx = Math.max(min.x, Math.min(p.x, max.x));
       const cz = Math.max(min.z, Math.min(p.z, max.z));
       const dx = p.x - cx, dz = p.z - cz;

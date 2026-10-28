@@ -221,12 +221,23 @@ export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings
       hookables.push(trunk);
       const half = r * 0.85; // 圓柱用略小的方塊當碰撞
       colliders.push({ min: new THREE.Vector3(x - half, 0, z - half), max: new THREE.Vector3(x + half, h, z + half) });
-      // 樹冠（不能勾、不擋路，只是遮光與輪廓）
-      const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(r * 3.2, 0), leaves[Math.floor(rnd() * 2)]);
-      crown.position.set(x, h + r * 1.6, z);
+      // 樹冠：可以勾；中間有實心的碰撞（可以站在上面、撞得到），外圍的葉子穿得過
+      const cr = r * 3.2;
+      const cy = h + r * 1.6;
+      const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(cr, 0), leaves[Math.floor(rnd() * 2)]);
+      crown.position.set(x, cy, z);
       crown.scale.y = 0.7;
       crown.castShadow = !lowSpec;
+      crown.userData.building = true;
       scene.add(crown);
+      hookables.push(crown);
+      const ch = cr * 0.6, cv = cr * 0.7 * 0.6;
+      colliders.push({ min: new THREE.Vector3(x - ch, cy - cv, z - ch), max: new THREE.Vector3(x + ch, cy + cv, z + ch) });
+      // 準心吸附點：樹冠下緣一圈
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + 0.3;
+        snapAnchors.push({ pos: new THREE.Vector3(x + Math.sin(a) * cr * 0.78, cy - cr * 0.7 * 0.35, z + Math.cos(a) * cr * 0.78), object: crown });
+      }
       // 準心吸附點：樹幹四周的上段與中段
       for (let i = 0; i < 4; i++) {
         const a = (i / 4) * Math.PI * 2;

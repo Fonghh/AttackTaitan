@@ -404,8 +404,9 @@ test('flip dash: double-tap dash in the air bursts, then keeps its momentum', ()
   p.pos.set(0, 40, 0);
   const start = p.pos.clone();
   const press = (i) => ({ ...idle(), move: { x: 1, y: 0 }, boost: i === 0 || i === 6, boostPressed: i === 0 || i === 6 });
-  let flipped = false, maxSpeed = 0;
-  for (let i = 0; i < 40; i++) {
+  let flipped = false, maxSpeed = 0, tuckSpeed = 99;
+  for (let i = 0; i < 100; i++) {
+    if (p.flip?.phase === 'tuck' && p.flip.t < p.flip.tuck * 0.4) tuckSpeed = Math.min(tuckSpeed, p.speed);
     p.update(1 / 60, press(i), world());
     if (p.flip) flipped = true;
     maxSpeed = Math.max(maxSpeed, p.speed);
@@ -413,7 +414,8 @@ test('flip dash: double-tap dash in the air bursts, then keeps its momentum', ()
   }
   const dist = Math.hypot(p.pos.x - start.x, p.pos.z - start.z);
   assert.ok(flipped, 'second tap within the window starts the flip');
-  assert.ok(dist > 12, `burst ${dist.toFixed(1)}m sideways`);
+  assert.ok(tuckSpeed < 6, `tuck: nearly stops in the air before the burst (${tuckSpeed.toFixed(1)} m/s)`);
+  assert.ok(dist > 28, `burst ${dist.toFixed(1)}m sideways`);
   assert.ok(p.speed > maxSpeed * 0.8, `keeps momentum after the burst (${p.speed.toFixed(1)} of ${maxSpeed.toFixed(1)} m/s)`);
   // 一次單按不會翻轉
   const q = new PlayerController(CONFIG);
@@ -500,4 +502,23 @@ test('double-tap dash while hooked + stick sideways: flips around the anchor (pe
   assert.ok(dir, 'flipped');
   const toA = A.clone().sub(p.pos).normalize();
   assert.ok(Math.abs(dir.dot(toA)) < 0.4, `sideways relative to the rope (dot ${dir.dot(toA).toFixed(2)})`);
+});
+
+test('flip along the rope: tuck, burst to the hook point, auto-detach and keep flying up past it', () => {
+  const p = new PlayerController(CONFIG);
+  p.speedScale = CONFIG.player.defaultSpeedScale;
+  p.pos.set(0, 10, 3);
+  p.fireHook('right', p.pos.clone(), anchorAt(0, 45, 0));
+  for (let i = 0; i < 40 && !p.hooks.right.attached; i++) p.update(1 / 60, idle(), world());
+  let detached = false, maxY = 0;
+  for (let i = 0; i < 220; i++) {
+    const tap = i === 0 || i === 6;
+    p.update(1 / 60, { ...idle(), boost: tap, boostPressed: tap }, world());
+    if (p.events.some((e) => e.type === 'flipDetach')) detached = true;
+    p.events.length = 0;
+    maxY = Math.max(maxY, p.pos.y);
+  }
+  assert.ok(detached, 'rope auto-released at the hook point');
+  assert.ok(!p.hooks.right.active, 'no rope left');
+  assert.ok(maxY > 45 + 10, `flew on past the hook point (peak ${maxY.toFixed(1)}m, hook at 45m)`);
 });

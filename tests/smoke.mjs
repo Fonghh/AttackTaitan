@@ -717,11 +717,12 @@ try {
     const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
     for (let i = 0; i < 30; i++) g.step(1 / 60, base());
     const trees = g.city.hookables.filter((m) => m.geometry.type === 'CylinderGeometry' && m.userData.building).length;
-    const inside = g.titans.filter((t) => g.city.colliders.some((c) => t.root.position.x > c.min.x && t.root.position.x < c.max.x && t.root.position.z > c.min.z && t.root.position.z < c.max.z)).length;
+    const crowns = g.city.hookables.filter((m) => m.geometry.type === 'IcosahedronGeometry').length;
+    const inside = g.titans.filter((t) => g.city.colliders.some((c) => c.min.y < t.height && t.root.position.x > c.min.x && t.root.position.x < c.max.x && t.root.position.z > c.min.z && t.root.position.z < c.max.z)).length;
     const aim = !!g.aims.auto;
-    return { trees, titans: g.titans.length, inside, aim, y: +g.pc.pos.y.toFixed(1) };
+    return { trees, crowns, titans: g.titans.length, inside, aim, y: +g.pc.pos.y.toFixed(1) };
   });
-  check('[forest] giant trees to hook, 4 titans in clearings, spawn on the platform', forest.trees > 40 && forest.titans === 4 && forest.inside === 0 && forest.y > 40 && forest.aim, JSON.stringify(forest));
+  check('[forest] giant trees (trunks and leafy crowns) to hook, 4 titans in clearings, spawn on the platform', forest.trees > 40 && forest.crowns === forest.trees && forest.titans === 4 && forest.inside === 0 && forest.y > 40 && forest.aim, JSON.stringify(forest));
 
   check('no console/page errors (desktop)', errors.length === 0, errors.slice(0, 3).join(' | '));
   await page.close(); // 關掉桌機頁面，避免背景持續渲染拖慢手機測試
