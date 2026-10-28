@@ -68,22 +68,34 @@ export class Titan {
     this.kind = spawn.kind ?? 'normal'; // 'normal' | 'abnormal'（奇行種）
     this.dummy = !!spawn.dummy; // 訓練用木人：木頭色、不會動、不會死（被砍到剩 1 血後自動恢復）
     const look = (this.look = makeLook(spawn, this.kind, this.dummy));
-    const g = look.girth; // 四肢粗細
+    const toon = (this.toon = cfg.style === 'toon'); // 卡通畫風：Q 版大頭、大眼、粉彩膚色、沒有肌肉線條
+    const g = look.girth * (toon ? 1.15 : 1); // 四肢粗細（卡通版肉肉的）
     const gt = look.torso; // 軀幹寬度
 
     // 每隻巨人自己的材質（受擊閃紅、死亡淡出不會互相影響）
-    const tint = look.tint;
-    this.skin = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.72, flatShading: true, emissive: '#000000' });
-    const shade = new THREE.MeshStandardMaterial({ color: new THREE.Color(tint).multiplyScalar(0.8), roughness: 0.8, flatShading: true });
-    const hairMat = new THREE.MeshStandardMaterial({ color: look.hairColor, roughness: 1, flatShading: true });
-    this.eyeMat = new THREE.MeshStandardMaterial({ color: '#fff7d6', emissive: '#ffd27a', emissiveIntensity: 0.6 });
-    const socketMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(tint).multiplyScalar(0.45), roughness: 1, flatShading: true });
-    const mouthMat = new THREE.MeshStandardMaterial({ color: '#3b1414', roughness: 1 });
+    const tint = toon ? '#' + new THREE.Color(look.tint).lerp(new THREE.Color('#fff1e6'), 0.42).getHexString() : look.tint;
+    const flat = !toon;
+    this.skin = new THREE.MeshStandardMaterial({ color: tint, roughness: toon ? 0.85 : 0.72, flatShading: flat, emissive: '#000000' });
+    const shade = new THREE.MeshStandardMaterial({ color: new THREE.Color(tint).multiplyScalar(0.8), roughness: 0.8, flatShading: flat });
+    const hairMat = new THREE.MeshStandardMaterial({ color: toon ? new THREE.Color(look.hairColor).lerp(new THREE.Color('#ffffff'), 0.12) : look.hairColor, roughness: toon ? 0.8 : 1, flatShading: flat });
+    // 眼睛（eyeWorld 用）：寫實版是發光的眼珠；卡通版是黑色瞳孔（眼白另外做）
+    this.eyeColors = toon ? ['#2a2233', '#c23a5a'] : ['#fff7d6', '#5a1010']; // [平常, 暈眩]
+    this.eyeGlow = toon ? 0.05 : 0.6;
+    this.eyeMat = new THREE.MeshStandardMaterial({ color: this.eyeColors[0], emissive: toon ? '#2a2233' : '#ffd27a', emissiveIntensity: this.eyeGlow, roughness: 0.3 });
+    const socketMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(tint).multiplyScalar(0.45), roughness: 1, flatShading: flat });
+    const mouthMat = new THREE.MeshStandardMaterial({ color: toon ? '#8a3346' : '#3b1414', roughness: 1 });
     const toothMat = new THREE.MeshStandardMaterial({ color: '#f1ead8', roughness: 0.6 });
     this.napeMat = new THREE.MeshStandardMaterial({ color: '#ff6a2a', emissive: '#ff4a10', emissiveIntensity: 1.6, roughness: 0.4 });
     this.handMatR = this.skin.clone();
     this.handMatL = this.skin.clone();
-    this.materials = [this.skin, shade, hairMat, this.eyeMat, socketMat, mouthMat, toothMat, this.napeMat, this.handMatR, this.handMatL];
+    const whiteMat = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#ffffff', emissiveIntensity: 0.25, roughness: 0.4 });
+    const blushMat = new THREE.MeshStandardMaterial({ color: '#ff9db0', roughness: 0.9, transparent: true, opacity: 0.85 });
+    const tongueMat = new THREE.MeshStandardMaterial({ color: '#ff7f94', roughness: 0.7 });
+    // 卡通版穿一件粉彩短褲（顏色依名字固定）；木人不穿
+    const SHORTS = ['#8fc9f0', '#f5a3b5', '#a8dba0', '#ffd27a', '#c3a8ec', '#ffb38a'];
+    const shortsMat = new THREE.MeshStandardMaterial({ color: look.shorts || SHORTS[hashStr(this.name) % SHORTS.length], roughness: 0.85 });
+    const wearShorts = toon && !this.dummy;
+    this.materials = [this.skin, shade, hairMat, this.eyeMat, socketMat, mouthMat, toothMat, this.napeMat, this.handMatR, this.handMatL, whiteMat, blushMat, tongueMat, shortsMat];
 
     // 同一個關節、同一種材質的零件合併成一個網格（手機上 draw call 少很多）
     const bins = new Map();
@@ -114,7 +126,7 @@ export class Titan {
     this.pelvis = new THREE.Group();
     this.pelvis.position.y = 9;
     this.fall.add(this.pelvis);
-    add(this.pelvis, sph(2.4).scale(1.15 * gt, 0.8, 0.9 * gt), this.skin);
+    add(this.pelvis, sph(2.4, 14, 10).scale(1.15 * gt, 0.8, 0.9 * gt), wearShorts ? shortsMat : this.skin);
 
     const leg = (sx) => {
       const hip = new THREE.Group();
@@ -124,11 +136,15 @@ export class Titan {
       hip.add(knee);
       this.pelvis.add(hip);
       add(hip, cap(1.15 * g, 3.0), this.skin, 0, -2.2, 0);
-      add(hip, sph(1.0 * g, 8, 6).scale(1, 1.6, 0.8), shade, 0.15 * sx, -2.0, 0.55 * g); // 大腿前側肌肉
-      add(knee, sph(0.55 * g, 8, 6), shade, 0, 0.1, 0.75 * g); // 膝蓋骨
+      if (wearShorts) add(hip, cap(1.32 * g, 0.9), shortsMat, 0, -0.9, 0); // 短褲褲管
+      if (!toon) {
+        add(hip, sph(1.0 * g, 8, 6).scale(1, 1.6, 0.8), shade, 0.15 * sx, -2.0, 0.55 * g); // 大腿前側肌肉
+        add(knee, sph(0.55 * g, 8, 6), shade, 0, 0.1, 0.75 * g); // 膝蓋骨
+        add(knee, sph(0.85 * g, 8, 6).scale(1, 1.5, 0.9), shade, 0, -1.4, -0.45 * g); // 小腿肚
+      }
       add(knee, cap(0.95 * g, 3.0), this.skin, 0, -2.1, 0);
-      add(knee, sph(0.85 * g, 8, 6).scale(1, 1.5, 0.9), shade, 0, -1.4, -0.45 * g); // 小腿肚
-      add(knee, new THREE.BoxGeometry(1.7 * g, 0.7, 2.8), this.skin, 0, -4.0, 0.6);
+      if (toon) add(knee, sph(1.0 * g, 10, 8).scale(1, 0.55, 1.5), this.skin, 0, -4.0, 0.6); // 圓圓的腳丫
+      else add(knee, new THREE.BoxGeometry(1.7 * g, 0.7, 2.8), this.skin, 0, -4.0, 0.6);
       for (let i = 0; i < 4; i++) add(knee, sph(0.22, 6, 4), this.skin, (-0.55 + i * 0.37) * g, -4.15, 2.0); // 腳趾
       return { hip, knee };
     };
@@ -144,12 +160,12 @@ export class Titan {
     this.spine.add(this.chest);
     add(this.chest, sph(2.9, 12, 10).scale(1.2 * gt, 0.85, 0.85 * gt), this.skin, 0, 0.6, 0);
     // 胸肌、鎖骨
-    for (const sx of [1, -1]) {
+    for (const sx of toon ? [] : [1, -1]) {
       add(this.chest, sph(1.4, 10, 6).scale(1.2 * gt, 0.55, 0.3), shade, 1.15 * sx * gt, 0.75, 2.15 * gt);
       add(this.chest, cap(0.18, 2.0), shade, 1.25 * sx * gt, 1.75, 1.75 * gt, 0, 0, Math.PI / 2 - 0.25 * sx);
     }
     // 腹肌（六塊）＋肚臍
-    if (look.belly < 1.2) {
+    if (look.belly < 1.2 && !toon) {
       for (let i = 0; i < 3; i++) {
         for (const sx of [1, -1]) add(this.spine, new THREE.BoxGeometry(0.9, 0.72, 0.3), shade, 0.52 * sx * gt, 1.05 + i * 0.9, 1.78 * gt);
       }
@@ -165,9 +181,9 @@ export class Titan {
       this.chest.add(shoulder);
       add(shoulder, sph(1.3 * g, 8, 6), this.skin); // 三角肌
       add(shoulder, cap(0.9 * g, 2.6), this.skin, 0, -2.1, 0);
-      add(shoulder, sph(0.75 * g, 8, 6).scale(1, 1.4, 1), shade, 0, -1.7, 0.45 * g); // 二頭肌
+      if (!toon) add(shoulder, sph(0.75 * g, 8, 6).scale(1, 1.4, 1), shade, 0, -1.7, 0.45 * g); // 二頭肌
       add(elbow, cap(0.8 * g, 2.6), this.skin, 0, -1.9, 0);
-      add(elbow, sph(0.75 * g, 8, 6).scale(1, 1.3, 0.9), shade, 0, -0.9, 0.2 * g); // 前臂肌肉
+      if (!toon) add(elbow, sph(0.75 * g, 8, 6).scale(1, 1.3, 0.9), shade, 0, -0.9, 0.2 * g); // 前臂肌肉
       const hand = new THREE.Mesh(sph(1.2, 8, 6).scale(1, 1.3, 0.7), handMat);
       hand.position.set(0, -4.2, 0);
       hand.castShadow = true;
@@ -184,43 +200,49 @@ export class Titan {
     this.chest.add(this.neck);
     add(this.neck, cap(1.05 * Math.min(1.15, g), 1.0), this.skin, 0, 0.6, 0);
     this.head = new THREE.Group();
-    this.head.position.y = 1.9;
-    this.head.scale.setScalar(look.headScale);
+    // 卡通版：大頭（Q 版），頭往上抬，讓後頸弱點露出來、不會被大頭蓋住
+    const hs = look.headScale * (toon ? 1.8 : 1);
+    this.head.position.y = toon ? 1.9 + (hs - 1) * 2 : 1.9;
+    this.head.scale.setScalar(hs);
     this.neck.add(this.head);
     const H = this.head;
-    add(H, sph(1.75, 12, 10).scale(1, 1.15, 1.05), this.skin, 0, 0.6, 0);
-    add(H, sph(0.45, 6, 4).scale(0.5, 1, 0.8), this.skin, 1.72, 0.6, 0); // 耳朵
-    add(H, sph(0.45, 6, 4).scale(0.5, 1, 0.8), this.skin, -1.72, 0.6, 0);
-    add(H, new THREE.ConeGeometry(0.32, 0.8, 4).rotateX(Math.PI / 2 + 0.25), this.skin, 0, 0.35, 1.9); // 鼻子
-    add(H, sph(0.55, 8, 6).scale(1.4, 0.7, 0.6), this.skin, 0, -0.75, 1.45); // 下巴
-    // 眼窩（深色）＋眼睛（發光，eyeWorld 用）
-    for (const sx of [1, -1]) add(H, sph(0.46, 8, 6).scale(1.2, 0.85, 0.5), socketMat, 0.6 * sx, 0.85, 1.5);
-    const eye = new THREE.SphereGeometry(0.32 * look.eyeSize, 8, 6);
-    this.eyes = [part(eye, this.eyeMat, 0.6, 0.85, 1.6), part(eye, this.eyeMat, -0.6, 0.85, 1.6)];
-    H.add(...this.eyes);
-    // 眉毛：表情
-    const browTilt = look.face === 'angry' ? 0.38 : look.face === 'grin' ? -0.15 : 0.05;
-    const browY = look.face === 'grin' ? 1.38 : 1.25;
-    for (const sx of [1, -1]) add(H, new THREE.BoxGeometry(0.85, 0.16, 0.25), hairMat, 0.62 * sx, browY, 1.62, 0, 0, browTilt * sx);
-    // 嘴巴
-    if (look.face === 'grin') {
-      // 咧到耳邊的笑：沿著上揚的弧線排一排牙齒
-      const N = 9;
-      for (let i = 0; i < N; i++) {
-        const u = i / (N - 1) - 0.5;
-        const x = u * 2.6;
-        const y = -0.2 + u * u * 1.4;
-        const z = 1.62 - u * u * 0.9;
-        add(H, new THREE.BoxGeometry(0.34, 0.42, 0.25), mouthMat, x, y, z);
-        add(H, new THREE.BoxGeometry(0.24, 0.17, 0.2), toothMat, x, y + 0.1, z + 0.08);
-        add(H, new THREE.BoxGeometry(0.24, 0.15, 0.2), toothMat, x, y - 0.11, z + 0.08);
-      }
-    } else if (look.face === 'angry') {
-      add(H, new THREE.BoxGeometry(1.4, 0.75, 0.35), mouthMat, 0, -0.25, 1.6);
-      add(H, new THREE.BoxGeometry(1.25, 0.16, 0.25), toothMat, 0, 0.05, 1.72);
-      add(H, new THREE.BoxGeometry(1.25, 0.16, 0.25), toothMat, 0, -0.55, 1.72);
+    add(H, toon ? sph(1.75, 18, 14).scale(1.05, 1.08, 1.02) : sph(1.75, 12, 10).scale(1, 1.15, 1.05), this.skin, 0, 0.6, 0);
+    if (toon) {
+      this._toonFace(H, look, add, { hairMat, mouthMat, whiteMat, blushMat, tongueMat });
     } else {
-      add(H, new THREE.BoxGeometry(1.3, 0.16, 0.3), mouthMat, 0, -0.2, 1.65);
+      add(H, sph(0.45, 6, 4).scale(0.5, 1, 0.8), this.skin, 1.72, 0.6, 0); // 耳朵
+      add(H, sph(0.45, 6, 4).scale(0.5, 1, 0.8), this.skin, -1.72, 0.6, 0);
+      add(H, new THREE.ConeGeometry(0.32, 0.8, 4).rotateX(Math.PI / 2 + 0.25), this.skin, 0, 0.35, 1.9); // 鼻子
+      add(H, sph(0.55, 8, 6).scale(1.4, 0.7, 0.6), this.skin, 0, -0.75, 1.45); // 下巴
+      // 眼窩（深色）＋眼睛（發光，eyeWorld 用）
+      for (const sx of [1, -1]) add(H, sph(0.46, 8, 6).scale(1.2, 0.85, 0.5), socketMat, 0.6 * sx, 0.85, 1.5);
+      const eye = new THREE.SphereGeometry(0.32 * look.eyeSize, 8, 6);
+      this.eyes = [part(eye, this.eyeMat, 0.6, 0.85, 1.6), part(eye, this.eyeMat, -0.6, 0.85, 1.6)];
+      H.add(...this.eyes);
+      // 眉毛：表情
+      const browTilt = look.face === 'angry' ? 0.38 : look.face === 'grin' ? -0.15 : 0.05;
+      const browY = look.face === 'grin' ? 1.38 : 1.25;
+      for (const sx of [1, -1]) add(H, new THREE.BoxGeometry(0.85, 0.16, 0.25), hairMat, 0.62 * sx, browY, 1.62, 0, 0, browTilt * sx);
+      // 嘴巴
+      if (look.face === 'grin') {
+        // 咧到耳邊的笑：沿著上揚的弧線排一排牙齒
+        const N = 9;
+        for (let i = 0; i < N; i++) {
+          const u = i / (N - 1) - 0.5;
+          const x = u * 2.6;
+          const y = -0.2 + u * u * 1.4;
+          const z = 1.62 - u * u * 0.9;
+          add(H, new THREE.BoxGeometry(0.34, 0.42, 0.25), mouthMat, x, y, z);
+          add(H, new THREE.BoxGeometry(0.24, 0.17, 0.2), toothMat, x, y + 0.1, z + 0.08);
+          add(H, new THREE.BoxGeometry(0.24, 0.15, 0.2), toothMat, x, y - 0.11, z + 0.08);
+        }
+      } else if (look.face === 'angry') {
+        add(H, new THREE.BoxGeometry(1.4, 0.75, 0.35), mouthMat, 0, -0.25, 1.6);
+        add(H, new THREE.BoxGeometry(1.25, 0.16, 0.25), toothMat, 0, 0.05, 1.72);
+        add(H, new THREE.BoxGeometry(1.25, 0.16, 0.25), toothMat, 0, -0.55, 1.72);
+      } else {
+        add(H, new THREE.BoxGeometry(1.3, 0.16, 0.3), mouthMat, 0, -0.2, 1.65);
+      }
     }
     // 頭髮
     if (look.hair !== 'bald') add(H, new THREE.SphereGeometry(1.85, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.5).scale(1, 1.1, 1.1), hairMat, 0, 0.75, -0.1);
@@ -236,7 +258,7 @@ export class Titan {
     flush();
 
     // 弱點：後頸發光區（巨人面向 +Z，背後為 -Z）。不用點光源（多隻巨人時手機吃不消），靠自發光
-    this.nape = part(new THREE.SphereGeometry(1, 16, 12).scale(1.0, 0.75, 0.45), this.napeMat, 0, 1.0, -0.95);
+    this.nape = part(new THREE.SphereGeometry(1, 16, 12).scale(1.0, 0.75, 0.45), this.napeMat, 0, toon ? 0.9 : 1.0, toon ? -1.2 : -0.95);
     this.nape.castShadow = false;
     this.nape.userData.nape = true;
     this.neck.add(this.nape);
@@ -251,7 +273,6 @@ export class Titan {
 
     // 碰撞球（相對各部位，半徑為未縮放值）
     // 依體型調整：四肢 × 粗細、軀幹 × 寬度、頭 × 頭的大小
-    const hs = look.headScale;
     this.sphereDefs = [
       [this.pelvis, 0, 0, 0, 2.5 * gt],
       [this.spine, 0, 2.4, 0, 2.6 * gt * look.belly],
@@ -320,6 +341,44 @@ export class Titan {
   setState(s) {
     this.state = s;
     this.stateTime = 0;
+  }
+
+  /** 卡通版的臉：大眼睛（眼白＋黑瞳孔＋高光）、腮紅、小鼻子、可愛嘴型；奇行種是鬥雞眼＋吐舌頭 */
+  _toonFace(H, look, add, { hairMat, mouthMat, whiteMat, blushMat, tongueMat }) {
+    const sph = (r, ws = 12, hs = 10) => new THREE.SphereGeometry(r, ws, hs);
+    const es = look.eyeSize;
+    const odd = this.kind === 'abnormal';
+    add(H, sph(0.16, 8, 6), this.skin, 0, 0.32, 1.8); // 小鼻子
+    for (const sx of [1, -1]) add(H, sph(0.42, 8, 6).scale(0.55, 1, 0.8), this.skin, 1.8 * sx, 0.55, 0); // 耳朵
+    // 眼白
+    const sr = (odd ? 0.68 : 0.55) * es;
+    for (const sx of [1, -1]) add(H, sph(sr).scale(0.85, 1.1, 0.5), whiteMat, 0.68 * sx, 0.78, 1.5);
+    // 瞳孔（eyeWorld 用的眼睛）：奇行種的瞳孔小小的、各看各的
+    const pr = (odd ? 0.2 : 0.32) * es;
+    const off = odd ? [[0.14, 0.16], [-0.1, -0.14]] : [[0, -0.04], [0, -0.04]];
+    const pupil = sph(pr).scale(1, 1.15, 0.45);
+    this.eyes = [0.68, -0.68].map((x, i) => part(pupil, this.eyeMat, x + off[i][0], 0.78 + off[i][1], 1.5 + sr * 0.5 * 0.9 + 0.02));
+    H.add(...this.eyes);
+    for (let i = 0; i < 2; i++) {
+      const e = this.eyes[i].position;
+      add(H, sph(pr * 0.35, 8, 6), whiteMat, e.x + pr * 0.35, e.y + pr * 0.45, e.z + pr * 0.4); // 高光
+    }
+    // 腮紅
+    for (const sx of [1, -1]) add(H, sph(0.38, 10, 8).scale(1.2, 0.6, 0.25), blushMat, 1.1 * sx, 0.12, 1.38);
+    // 嘴巴
+    if (look.face === 'grin') {
+      // 張嘴笑（Ｄ字形）＋小舌頭
+      add(H, new THREE.SphereGeometry(0.55, 16, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2).scale(1.2, 0.9, 0.35), mouthMat, 0, -0.12, 1.6);
+      add(H, sph(0.3, 10, 6).scale(1.2, 0.55, 0.4), tongueMat, 0, -0.46, 1.68);
+      if (odd) add(H, new THREE.CapsuleGeometry(0.22, 0.6, 4, 8), tongueMat, 0.3, -0.95, 1.78, 0.25, 0, 0.25); // 吐舌頭
+    } else if (look.face === 'angry') {
+      // 嘟起來的小 o 嘴＋皺眉
+      add(H, sph(0.28, 10, 8).scale(1.2, 0.85, 0.4), mouthMat, 0, -0.25, 1.72);
+      for (const sx of [1, -1]) add(H, new THREE.CapsuleGeometry(0.09, 0.55, 4, 6), hairMat, 0.66 * sx, 1.42, 1.66, 0, 0, Math.PI / 2 + 0.4 * sx);
+    } else {
+      // 小小的微笑
+      add(H, new THREE.TorusGeometry(0.3, 0.07, 6, 14, Math.PI), mouthMat, 0, -0.08, 1.76, 0, 0, Math.PI);
+    }
   }
 
   napeWorld(out) {
@@ -913,8 +972,8 @@ export class Titan {
     // 弱點脈動；受擊閃白；預備攻擊時手掌發紅；暈眩時眼睛變暗
     const pulse = 1.4 + Math.sin(t * 5) * 0.5;
     this.napeMat.emissiveIntensity = this.alive ? pulse : 0.2;
-    this.eyeMat.emissiveIntensity = this.stunTimer > 0 || !this.alive ? 0 : 0.6;
-    this.eyeMat.color.set(this.stunTimer > 0 ? '#5a1010' : '#fff7d6');
+    this.eyeMat.emissiveIntensity = this.stunTimer > 0 || !this.alive ? 0 : this.eyeGlow;
+    this.eyeMat.color.set(this.eyeColors[this.stunTimer > 0 ? 1 : 0]);
     // 受擊：整隻閃紅，逐漸退回
     const hf = Math.max(0, Math.min(1, this.hitFlash / 0.25));
     this.skin.emissive.setRGB(1.1 * hf, 0.08 * hf, 0.05 * hf);

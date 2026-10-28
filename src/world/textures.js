@@ -122,3 +122,40 @@ export function barkTexture() {
   tex.repeat.set(3, 6);
   return tex;
 }
+
+/** 卡通外牆：粉彩牆面、圓角淺藍窗戶＋白窗框、每層一條亮色腰線（一格 4m × 4m） */
+export function toonFacadeTexture(seed, wall, ledge) {
+  const rnd = mulberry32(seed);
+  return canvasTexture(256, (g, S) => {
+    g.fillStyle = wall;
+    g.fillRect(0, 0, S, S);
+    const n = 8;
+    const c = S / n;
+    for (let y = 0; y < n; y++) {
+      g.fillStyle = ledge;
+      g.fillRect(0, y * c + c - 3, S, 3);
+      for (let x = 0; x < n; x++) {
+        if (rnd() < 0.08) continue; // 偶爾少一扇窗，比較不呆板
+        const wx = x * c + c * 0.24, wy = y * c + c * 0.2, ww = c * 0.52, wh = c * 0.56;
+        const r = 4;
+        g.fillStyle = '#ffffff';
+        roundRect(g, wx - 2, wy - 2, ww + 4, wh + 4, r + 1);
+        g.fillStyle = rnd() < 0.15 ? '#ffe9a8' : '#bfe2f5';
+        roundRect(g, wx, wy, ww, wh, r);
+        g.fillStyle = 'rgba(255,255,255,0.55)';
+        g.fillRect(wx + 3, wy + 3, ww * 0.22, wh - 6);
+      }
+    }
+  });
+}
+
+function roundRect(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+  g.fill();
+}

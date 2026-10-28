@@ -34,6 +34,7 @@ const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=sw
 try {
   // ───────── 桌機 ─────────
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  page.setDefaultTimeout(90000); // 軟體繪圖（swiftshader）第一次截圖可能要 30 秒左右
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
@@ -763,6 +764,7 @@ try {
   // ───────── 手機直立 ─────────
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
   const mp = await ctx.newPage();
+  mp.setDefaultTimeout(90000);
   const merr = [];
   mp.on('pageerror', (e) => merr.push(e.message));
   await mp.goto(`${URL_BASE}?touch&level=city`);

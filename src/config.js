@@ -311,6 +311,23 @@ export const CONFIG = {
     hookFollowAfter: 0.8, // 放索後繼續跟隨幾秒
   },
 
+  // 主角外觀（卡通畫風）：改這裡就能換造型
+  hero: {
+    skin: '#ffdcc4',
+    hair: '#5b3a28',
+    hairStyle: 'spiky', // 'short' 短髮 | 'spiky' 刺刺頭 | 'ponytail' 馬尾 | 'bob' 鮑伯頭
+    eyes: 'round', // 'round' 圓眼 | 'sharp' 銳利 | 'sleepy' 瞇瞇眼
+    eyeColor: '#2a2638',
+    blush: true, // 臉頰腮紅
+    jacket: '#d99a5f',
+    pants: '#fff3df',
+    boots: '#7a4e35',
+    cape: '#6cc39a',
+    accessory: 'scarf', // 'scarf' 圍巾 | 'goggles' 護目鏡 | 'headband' 頭帶 | 'none'
+    accessoryColor: '#ee5d5d',
+    headScale: 1.75, // 頭的大小（Q 版約 3 頭身）
+  },
+
   // 瓦斯雲帶：飛行時身後兩條柔和的雲狀帶子，停留數秒、慢慢擴散（和細長發亮的鋼索區分開）
   trailLines: { life: 3.5, interval: 0.04, width: 0.32, alpha: 0.42, spread: 3.5 },
 

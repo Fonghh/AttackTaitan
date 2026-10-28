@@ -22,3 +22,18 @@ test('titan looks are deterministic per spawn and differ between titans', () => 
   const looks = new Set(['A', 'B', 'C', 'D', 'E', 'F'].map((n, i) => JSON.stringify(new Titan(new Scene(), CONFIG, { name: n, x: i * 7, z: i * 3 }).look)));
   assert.ok(looks.size >= 5, `${looks.size} distinct looks out of 6`);
 });
+
+test('toon titans: the nape sticks out of the big head and the chest collision spheres', () => {
+  const cfg = { ...CONFIG, style: 'toon' };
+  for (const sp of [{ name: '一般', x: 0, z: 0 }, { name: '奇行種', kind: 'abnormal', x: 5, z: 5 }]) {
+    const t = new Titan(new Scene(), cfg, sp);
+    t.root.updateMatrixWorld(true);
+    t._updateSpheres();
+    const nape = t.napeWorld(new Vector3());
+    for (const i of [2, 3]) {
+      const s = t.spheres[i]; // 2 = 胸口、3 = 頭
+      const d = s.center.distanceTo(nape);
+      assert.ok(d > s.r + 0.1, `${sp.name}: nape outside sphere ${i} (dist ${d.toFixed(2)}, r ${s.r.toFixed(2)})`);
+    }
+  }
+});

@@ -16,20 +16,98 @@ function mesh(geo, mat, x = 0, y = 0, z = 0) {
   return m;
 }
 
+/**
+ * 卡通畫風的頭：大頭（Q 版）、大眼睛＋高光、腮紅、小嘴巴、髮型、配件。
+ * 模型面向 -Z（臉在 -Z 那面）。頭的原始半徑 0.14，整顆頭再放大 headScale 倍。
+ */
+function buildToonHead(head, HL, skin, hairMat) {
+  head.scale.setScalar(HL.headScale);
+  head.position.y += 0.02;
+  const dark = new THREE.MeshStandardMaterial({ color: HL.eyeColor, roughness: 0.3 });
+  const white = new THREE.MeshBasicMaterial({ color: '#ffffff' });
+  const blush = new THREE.MeshBasicMaterial({ color: '#ff8fa3', transparent: true, opacity: 0.85 });
+  const acc = new THREE.MeshStandardMaterial({ color: HL.accessoryColor, roughness: 0.8 });
+  const add = (geo, mat, x, y, z, rx = 0, ry = 0, rz = 0) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    m.rotation.set(rx, ry, rz);
+    head.add(m);
+    return m;
+  };
+  // 眼睛
+  for (const sx of [-1, 1]) {
+    if (HL.eyes === 'sleepy') {
+      add(new THREE.TorusGeometry(0.022, 0.006, 4, 10, Math.PI), dark, 0.05 * sx, 0.07, -0.132, 0, 0, Math.PI);
+    } else {
+      const sy = HL.eyes === 'sharp' ? 0.75 : 1.25;
+      const e = add(new THREE.SphereGeometry(0.026, 10, 8), dark, 0.05 * sx, 0.065, -0.125);
+      e.scale.set(1, sy, 0.5);
+      if (HL.eyes === 'sharp') e.rotation.z = -0.35 * sx;
+      add(new THREE.SphereGeometry(0.009, 6, 4), white, 0.057 * sx, 0.08, -0.137);
+    }
+    if (HL.blush) {
+      const b = add(new THREE.CircleGeometry(0.022, 12), blush, 0.078 * sx, 0.03, -0.126, 0, Math.PI - 0.5 * sx, 0);
+      b.scale.set(1.3, 0.8, 1);
+    }
+  }
+  // 小嘴巴（微笑弧線）
+  add(new THREE.TorusGeometry(0.018, 0.004, 4, 10, Math.PI), dark, 0, 0.02, -0.136, 0, 0, Math.PI);
+  // 髮型
+  const cap = add(new THREE.SphereGeometry(0.152, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.52), hairMat, 0, 0.085, 0.012);
+  cap.scale.set(1, 1.02, 1.04);
+  // 後腦勺的頭髮：蓋住後半顆頭到脖子
+  const back = add(new THREE.SphereGeometry(0.152, 14, 8, 0, Math.PI, Math.PI * 0.35, Math.PI * 0.45), hairMat, 0, 0.07, 0.008);
+  back.scale.set(1.02, 1.05, 1.04);
+  for (let i = 0; i < 4; i++) {
+    // 瀏海
+    const bang = add(new THREE.SphereGeometry(0.045, 8, 6), hairMat, -0.075 + i * 0.05, 0.135, -0.11);
+    bang.scale.set(1, 0.75, 0.6);
+  }
+  if (HL.hairStyle === 'spiky') {
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2;
+      add(new THREE.ConeGeometry(0.04, 0.11, 6), hairMat, Math.sin(a) * 0.09, 0.2, Math.cos(a) * 0.09 + 0.02, Math.cos(a) * 0.7, 0, -Math.sin(a) * 0.7);
+    }
+  } else if (HL.hairStyle === 'ponytail') {
+    add(new THREE.SphereGeometry(0.035, 8, 6), hairMat, 0, 0.13, 0.15);
+    const tail = add(new THREE.CapsuleGeometry(0.04, 0.16, 4, 8), hairMat, 0, 0.03, 0.2, 0.5, 0, 0);
+    tail.scale.set(1, 1, 0.8);
+  } else if (HL.hairStyle === 'bob') {
+    const bob = add(new THREE.CylinderGeometry(0.16, 0.17, 0.14, 16, 1, true), hairMat, 0, 0.02, 0.01);
+    bob.scale.set(1, 1, 1.02);
+  }
+  // 配件
+  if (HL.accessory === 'goggles') {
+    add(new THREE.TorusGeometry(0.15, 0.012, 6, 24), acc, 0, 0.13, 0, Math.PI / 2 - 0.25, 0, 0);
+    for (const sx of [-1, 1]) add(new THREE.CylinderGeometry(0.035, 0.035, 0.03, 12), new THREE.MeshStandardMaterial({ color: '#9fd8f5', metalness: 0.3, roughness: 0.2 }), 0.045 * sx, 0.165, -0.13, Math.PI / 2 + 0.6, 0, 0);
+  } else if (HL.accessory === 'headband') {
+    add(new THREE.TorusGeometry(0.145, 0.014, 6, 24), acc, 0, 0.11, 0, Math.PI / 2 - 0.12, 0, 0);
+  } else if (HL.accessory === 'scarf') {
+    // 圍巾：脖子一圈＋往後飄的尾巴
+    const s = add(new THREE.TorusGeometry(0.075, 0.03, 8, 18), acc, 0, -0.085, 0, Math.PI / 2, 0, 0);
+    s.scale.set(1, 1, 0.9);
+    const tail = add(new THREE.BoxGeometry(0.05, 0.12, 0.02), acc, 0.04, -0.13, 0.08, 0.6, 0, 0.2);
+    tail.userData.scarfTail = true;
+  }
+}
+
 export class PlayerModel {
-  constructor(scene) {
-    const skin = new THREE.MeshStandardMaterial({ color: '#e7c3a0', roughness: 0.7 });
-    const jacket = new THREE.MeshStandardMaterial({ color: '#7a5a3a', roughness: 0.8 });
-    const pants = new THREE.MeshStandardMaterial({ color: '#e8e2d2', roughness: 0.9 });
-    const boots = new THREE.MeshStandardMaterial({ color: '#2b211b', roughness: 0.6 });
-    const cape = new THREE.MeshStandardMaterial({ color: '#2f5d3a', roughness: 0.9, side: THREE.DoubleSide });
+  constructor(scene, cfg = {}) {
+    const toon = cfg.style === 'toon';
+    const HL = toon ? cfg.hero : null; // 卡通畫風的外觀設定
+    const skin = new THREE.MeshStandardMaterial({ color: HL ? HL.skin : '#e7c3a0', roughness: 0.7 });
+    if (HL) skin.emissive.set(HL.skin).multiplyScalar(0.18); // 卡通膚色亮一點，不會灰灰的
+    const jacket = new THREE.MeshStandardMaterial({ color: HL ? HL.jacket : '#7a5a3a', roughness: 0.8 });
+    const pants = new THREE.MeshStandardMaterial({ color: HL ? HL.pants : '#e8e2d2', roughness: 0.9 });
+    const boots = new THREE.MeshStandardMaterial({ color: HL ? HL.boots : '#2b211b', roughness: 0.6 });
+    const cape = new THREE.MeshStandardMaterial({ color: HL ? HL.cape : '#2f5d3a', roughness: 0.9, side: THREE.DoubleSide });
     const metal = new THREE.MeshStandardMaterial({ color: '#a8b0b8', metalness: 0.85, roughness: 0.3 });
     const blade = new THREE.MeshStandardMaterial({ color: '#e6eef6', metalness: 0.95, roughness: 0.12, emissive: '#1a2533', envMapIntensity: 1.6 });
     const leather = new THREE.MeshStandardMaterial({ color: '#3a2a1e', roughness: 0.75 });
     const darkMetal = new THREE.MeshStandardMaterial({ color: '#4d555e', metalness: 0.8, roughness: 0.35 });
     const edge = new THREE.MeshBasicMaterial({ color: '#dff4ff', transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
     this.metalMats = [metal, blade, darkMetal];
-    const hair = new THREE.MeshStandardMaterial({ color: '#2a2018', roughness: 0.9 });
+    const hair = new THREE.MeshStandardMaterial({ color: HL ? HL.hair : '#2a2018', roughness: 0.9 });
     this.bodyMats = [skin, jacket, pants, boots, cape, hair]; // 兵長斬時全身發紅光
 
     this.root = new THREE.Group(); // 位置與朝向
@@ -49,8 +127,9 @@ export class PlayerModel {
     this.head = new THREE.Group();
     this.head.position.y = 0.82;
     this.hips.add(this.head);
-    this.head.add(mesh(new THREE.SphereGeometry(0.14, 12, 10), skin, 0, 0.06, 0));
-    this.head.add(mesh(new THREE.SphereGeometry(0.15, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), hair, 0, 0.09, 0.01));
+    this.head.add(mesh(new THREE.SphereGeometry(0.14, 16, 12), skin, 0, 0.06, 0));
+    if (HL) buildToonHead(this.head, HL, skin, hair);
+    else this.head.add(mesh(new THREE.SphereGeometry(0.15, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), hair, 0, 0.09, 0.01));
 
     // 腰間發射器
     this.launcherL = mesh(new THREE.BoxGeometry(0.12, 0.16, 0.34), metal, 0.3, 0.05, 0);
@@ -268,7 +347,10 @@ export class PlayerModel {
     this.aura2.material.opacity = lg * 0.35;
     this.aura2.visible = lg > 0.02;
     this.aura2.scale.setScalar(2.2 + 0.3 * Math.sin(this.time * 23));
-    for (const m of this.bodyMats) m.emissive.setRGB(0.9 * lg, 0.06 * lg, 0.08 * lg);
+    for (const m of this.bodyMats) {
+      const b = m.userData.baseEm || (m.userData.baseEm = m.emissive.clone());
+      m.emissive.setRGB(b.r + 0.9 * lg, b.g + 0.06 * lg, b.b + 0.08 * lg);
+    }
     if (pc.flip && pc.flip.phase === 'tuck') {
       // 捲身翻轉：縮身往前翻一圈，翻完才爆衝
       const k = 1 - Math.max(0, pc.flip.t) / pc.flip.tuck;
@@ -438,7 +520,7 @@ export class PlayerModel {
     for (let i = 0; i < pos.count; i++) {
       const by = base[i * 3 + 1];
       const bx = base[i * 3];
-      const d = -by / 0.85; // 0（上）~ 1（下）
+      const d = Math.max(0, -by / 0.85); // 0（上）~ 1（下）
       const rf = Math.min(6.999, d * 7);
       const r0 = Math.floor(rf), u = rf - r0;
       const lerp = (a) => a[r0] + (a[r0 + 1] - a[r0]) * u;

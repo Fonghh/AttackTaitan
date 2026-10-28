@@ -78,9 +78,12 @@ export class Game {
     // 場景與角色
     const L = this.level;
     const clearings = L.titans.map((t) => ({ x: t.x, z: t.z, r: (t.homeRadius ?? 25) + 6 * (t.scale ?? 1) }));
-    this.city = buildCity(this.scene, cfg.world, L.spawn, this.touch, L.map, clearings);
+    // 畫風：toon＝卡通（粉彩、圓角，預設）／classic＝寫實；換畫風要重新載入
+    cfg.style = this._load('artStyle', 'toon') === 'classic' ? 'classic' : 'toon';
+    document.body.classList.toggle('toon', cfg.style === 'toon');
+    this.city = buildCity(this.scene, cfg.world, L.spawn, this.touch, L.map, clearings, cfg.style);
     this.pc = new PlayerController(cfg);
-    this.model = new PlayerModel(this.scene);
+    this.model = new PlayerModel(this.scene, cfg);
     // 刀身與裝置的金屬反光：用簡單的室內環境當反射來源（只套在角色的金屬上）
     const pmrem = new THREE.PMREMGenerator(renderer);
     this.model.setEnvMap(pmrem.fromScene(new RoomEnvironment(), 0.04).texture);
@@ -230,6 +233,10 @@ export class Game {
       this._save('gyro', this.gyroLevel);
       this._syncModeLabel();
     });
+    $('btn-artstyle').addEventListener('click', () => {
+      this._save('artStyle', this.cfg.style === 'toon' ? 'classic' : 'toon');
+      location.reload();
+    });
     $('btn-lockcam').addEventListener('click', () => {
       this.lockCam = !this.lockCam;
       this._save('lockCam', this.lockCam ? 'on' : 'off');
@@ -311,6 +318,7 @@ export class Game {
     document.getElementById('range-val').textContent = `鉤索射程 ${this.cfg.hook.range}m`;
     document.getElementById('reel-val').textContent = this.pc.autoReel > 0 ? `自動收繩 ${this.pc.autoReel} m/秒` : '自動收繩：關';
     document.getElementById('orbit-val').textContent = `繞圈半徑 ${this.pc.orbitRadius}m（巨人 ×${(this.cfg.hook.pull.orbitTitanFactor * 1).toFixed(2)}×體型）`;
+    document.getElementById('btn-artstyle').textContent = `畫風：${this.cfg.style === 'toon' ? '卡通' : '寫實'}（點一下切換，會重新載入）`;
     document.getElementById('btn-lockcam').textContent = `鎖定鏡頭（勾住巨人時）：${this.lockCam ? '開' : '關'}`;
     document.getElementById('btn-closecam').textContent = `近距離廣角鏡頭：${this.closeCam ? '開' : '關'}`;
     document.getElementById('btn-camroll').textContent = `鏡頭側傾：${{ high: '18°', low: '9°', off: '0°（不傾斜）' }[this.camRollLevel]}`;
