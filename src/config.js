@@ -335,9 +335,9 @@ export const CONFIG = {
     skin: '#ffdcc4',
     hair: '#5b3a28',
     hairStyle: 'spiky', // 'short' 短髮 | 'spiky' 刺刺頭 | 'ponytail' 馬尾 | 'bob' 鮑伯頭
-    eyes: 'round', // 'round' 圓眼 | 'sharp' 銳利 | 'sleepy' 瞇瞇眼
+    eyes: 'phoenix', // 'phoenix' 鳳眼（細長、眼尾上挑）| 'angry' 怒眼 | 'round' 圓眼 | 'sharp' 銳利 | 'sleepy' 瞇瞇眼
     eyeColor: '#2a2638', irisColor: '#2f9fbf', // 眼線／瞳孔顏色、虹膜顏色
-    blush: true, // 臉頰腮紅
+    blush: false, // 臉頰腮紅（兇的眼型預設關掉）
     jacket: '#d99a5f',
     pants: '#fff3df',
     boots: '#7a4e35',

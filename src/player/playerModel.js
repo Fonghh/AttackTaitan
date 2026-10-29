@@ -40,10 +40,36 @@ function buildToonHead(head, HL, skin, hairMat) {
   };
   const face = (geo, mat, x, y, z, rx = 0, ry = 0, rz = 0) => add(geo, mat, x, y, z, rx, ry, rz, true);
   // 眼睛
+  const browMat = makeMat(true, { color: HL.hair });
+  const fierce = HL.eyes === 'phoenix' || HL.eyes === 'angry';
   for (const sx of [-1, 1]) {
     const ex = 0.052 * sx;
+    // 眉毛角度（眉線和水平的夾角，正＝眼尾那端高、眼頭低）、高度
+    let browAng = -0.28, browY = 0.104, browR = 0.0055;
     if (HL.eyes === 'sleepy') {
       face(new THREE.TorusGeometry(0.022, 0.006, 4, 10, Math.PI), dark, ex, 0.06, -0.134, 0, 0, Math.PI);
+    } else if (fierce) {
+      const phoenix = HL.eyes === 'phoenix';
+      // 鳳眼：細長、眼尾上挑；怒眼：比較圓、眼頭壓低（眼皮往鼻子斜下）、瞳孔縮小
+      const tilt = (phoenix ? 0.3 : 0.12) * sx; // 正＝外側（眼尾）高
+      const ew = phoenix ? 1.25 : 1.0, eh = phoenix ? 0.52 : 0.72;
+      const ey = 0.056;
+      face(new THREE.SphereGeometry(0.033, 16, 10), white, ex, ey, -0.126, 0, 0, tilt).scale.set(ew, eh, 0.35);
+      // 虹膜高度不超過眼白（上下被眼皮切掉的感覺）
+      const ir = phoenix ? 0.019 : 0.017;
+      face(new THREE.SphereGeometry(ir, 14, 10), iris, ex - 0.003 * sx, ey - 0.002, -0.134, 0, 0, tilt).scale.set(0.88, phoenix ? 0.82 : 1, 0.3);
+      face(new THREE.SphereGeometry(phoenix ? 0.009 : 0.0065, 10, 8), dark, ex - 0.003 * sx, ey - 0.002, -0.139).scale.set(phoenix ? 0.5 : 0.9, phoenix ? 0.95 : 1.1, 0.3); // 鳳眼：細長的瞳孔
+      face(new THREE.SphereGeometry(0.0045, 6, 4), white, ex + 0.004 * sx, ey + 0.007, -0.142); // 一點銳利的高光
+      // 上眼皮：粗黑的線，蓋住眼白上緣；怒眼的眼頭那端壓低
+      const lidAng = phoenix ? tilt : 0.32 * sx;
+      const lid = face(new THREE.CapsuleGeometry(0.0075, 0.05 * ew, 3, 8), dark, ex, ey + 0.033 * eh * 0.55, -0.136, 0, 0, Math.PI / 2 + lidAng);
+      lid.scale.set(1, 1, 0.55);
+      // 眼尾上挑的「翅膀」
+      const wing = face(new THREE.CapsuleGeometry(0.005, 0.018, 3, 6), dark, ex + 0.036 * sx * ew * 0.85, ey + 0.012 + (phoenix ? 0.008 : 0), -0.133, 0, 0, Math.PI / 2 + (phoenix ? 0.75 : 0.45) * sx);
+      wing.scale.set(1, 1, 0.55);
+      browAng = phoenix ? 0.34 : 0.5; // 正＝眼頭那端低、眼尾高（兇）
+      browY = phoenix ? 0.091 : 0.088;
+      browR = phoenix ? 0.0065 : 0.008;
     } else {
       const sharp = HL.eyes === 'sharp';
       const tilt = sharp ? -0.22 * sx : 0;
@@ -57,16 +83,24 @@ function buildToonHead(head, HL, skin, hairMat) {
       const lash = face(new THREE.TorusGeometry(0.031, 0.0055, 4, 14, Math.PI * 0.85), dark, ex, 0.054, -0.133, 0, 0, Math.PI * 0.075 + tilt);
       lash.scale.set(0.95, sy * 0.95, 0.5);
     }
-    // 眉毛：有自信的角度（內低外高）
-    const brow = face(new THREE.CapsuleGeometry(0.0055, 0.03, 3, 6), makeMat(true, { color: HL.hair }), ex, 0.104, -0.124, 0, 0, Math.PI / 2 - 0.28 * sx);
+    // 眉毛：膠囊的軸沿 y，轉 π/2 變水平，再依角度傾斜（sx 讓左右對稱）
+    // 兇的眉毛畫在瀏海前面（動漫常見畫法），才不會被頭髮蓋住
+    const brow = face(new THREE.CapsuleGeometry(browR, fierce ? 0.036 : 0.032, 3, 6), browMat, ex + (fierce ? 0.004 * sx : 0), browY, fierce ? -0.152 : -0.126, 0, 0, Math.PI / 2 + browAng * sx);
+    if (fierce) brow.material = dark;
     brow.scale.set(1, 1, 0.6);
     if (HL.blush) {
       const b = face(new THREE.CircleGeometry(0.02, 14), blush, 0.08 * sx, 0.024, -0.124, 0, Math.PI - 0.55 * sx, 0);
       b.scale.set(1.35, 0.7, 1);
     }
   }
-  // 嘴巴：淺淺的壞笑（一邊高一點）
-  face(new THREE.TorusGeometry(0.015, 0.0035, 4, 10, Math.PI * 0.8), dark, 0.006, 0.014, -0.137, 0, 0, Math.PI * 1.13);
+  if (fierce) {
+    // 兇：抿著嘴、一邊嘴角微微上揚
+    face(new THREE.CapsuleGeometry(0.0032, 0.018, 3, 6), dark, -0.002, 0.012, -0.138, 0, 0, Math.PI / 2 - 0.08).scale.set(1, 1, 0.5);
+    face(new THREE.CapsuleGeometry(0.003, 0.007, 3, 6), dark, 0.0125, 0.0145, -0.137, 0, 0, Math.PI / 2 + 0.6).scale.set(1, 1, 0.5);
+  } else {
+    // 嘴巴：淺淺的壞笑（一邊高一點）
+    face(new THREE.TorusGeometry(0.015, 0.0035, 4, 10, Math.PI * 0.8), dark, 0.006, 0.014, -0.137, 0, 0, Math.PI * 1.13);
+  }
 
   // 髮型：底層髮帽＋一撮一撮的錐形髮束（每撮都有描邊，輪廓很清楚）
   const UP = new THREE.Vector3(0, 1, 0);
