@@ -741,6 +741,22 @@ try {
     g.pc.vel.set(-25, 4, 25);
     for (let i = 0; i < 40; i++) g.step(1 / 60, base());
     cam.behind = { turned: +turned.toFixed(2), maxDiff: +maxDiff.toFixed(3), flyDiff: +angDiff().toFixed(3), moved: +Math.abs(g.rig.yaw - yb).toFixed(2) };
+    // 手機：一邊繞圈一邊推準心到邊緣（＝手動轉鏡頭），鏡頭仍然貼在背後、不會暫停
+    const wasTouch = g.touch;
+    g.touch = true;
+    g.pc.pos.set(nape.x + 30, nape.y + 4, nape.z + 15);
+    g.pc.vel.set(0, 0, 0);
+    g.pc.fireHook('right', g.pc.pos.clone(), { point: nape.clone(), object: mesh });
+    let touchDiff = 0;
+    for (let i = 0; i < 120; i++) {
+      g.input.touch.turnX = 0.6;
+      g.step(1 / 60, { ...base(), move: { x: 1, y: 0 } });
+      if (i > 40) touchDiff = Math.max(touchDiff, angDiff());
+    }
+    g.input.touch.turnX = 0;
+    g.pc.releaseAll();
+    g.touch = wasTouch;
+    cam.behind.touchDiff = +touchDiff.toFixed(3);
     g.camMode = 'follow';
     g.cameraFollow = true;
     const texts = [g.hud.el.mission.textContent];
@@ -752,7 +768,7 @@ try {
   check('[training] wooden dummies never die and heal back', training.survived && training.regen, JSON.stringify(training));
   check('[camera] hooked on a titan: camera locks on and banks into the orbit; hits leave wounds', training.cam.locked && Math.abs(training.cam.roll) > 0.05 && training.cam.wounds > 0, JSON.stringify(training.cam));
   check('[camera] fixed view: orbiting and flying never turn or bank the camera', training.cam.fixed.dyaw < 1e-3 && training.cam.fixed.dpitch < 1e-3 && Math.abs(training.cam.fixed.roll) < 0.01 && !training.cam.fixed.locked, JSON.stringify(training.cam.fixed));
-  check('[camera] behind view: camera stays behind the character while orbiting and flying', training.cam.behind.turned > 0.5 && training.cam.behind.maxDiff < 0.35 && training.cam.behind.flyDiff < 0.2, JSON.stringify(training.cam.behind));
+  check('[camera] behind view: camera stays behind the character while orbiting and flying', training.cam.behind.turned > 0.5 && training.cam.behind.maxDiff < 0.35 && training.cam.behind.flyDiff < 0.2 && training.cam.behind.touchDiff < 0.35, JSON.stringify(training.cam.behind));
   check('[training] finishing all 6 steps completes the level, shows stars and unlocks the next level', training.state === 'won' && /★/.test(training.stars || '') && training.next, JSON.stringify(training));
   const rings = await levelRun('rings', () => {
     const g = window.__game;

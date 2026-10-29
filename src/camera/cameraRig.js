@@ -149,12 +149,13 @@ export class CameraRig {
       // 靠近巨人時往上仰（lowAngle 0～1）
       this.pitch += (C.followPitch + (opts.lowAngle || 0) * 0.34 - this.pitch) * k * 0.3;
     }
-    // 緊貼背後：轉到角色面朝的方向（手動轉視角後 manualPause 秒內不搶）
-    if (opts.behindYaw != null && this.time - this.lastManualLook > C.behind.manualPause) {
+    // 緊貼背後：轉到角色面朝的方向。手機上一直生效（陀螺儀、準心推到邊緣只會稍微偏一下，不會暫停跟隨）；
+    // 桌機用滑鼠轉視角後 manualPause 秒內不搶
+    if (opts.behindYaw != null && (opts.touch || this.time - this.lastManualLook > C.behind.manualPause)) {
       let d = opts.behindYaw - this.yaw;
       d = Math.atan2(Math.sin(d), Math.cos(d));
       const rate = pc.grounded ? C.behind.groundRate : C.behind.airRate;
-      this.yaw += d * Math.min(1, rate * (opts.realDt ?? dt));
+      this.yaw += d * Math.min(1, rate * dt); // 用遊戲時間：慢動作時角色轉得慢，鏡頭也跟著慢
     }
     const delay = opts.touch ? C.autoFollowDelayTouch : C.autoFollowDelayMouse;
     const fl = Math.hypot(this.followDir.x, this.followDir.z);
