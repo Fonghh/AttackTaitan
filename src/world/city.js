@@ -429,6 +429,36 @@ export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings
         addTree(x, z, r, 60 + rnd() * 30);
       }
     }
+    // 卡通風：林地的灌木叢、花、蘑菇（裝飾，不擋路、不能勾；另一組亂數）
+    if (toon) {
+      const bushes = [], flowers = [], shrooms = [];
+      for (let i = 0; i < 420; i++) {
+        const a = drnd() * Math.PI * 2, rr = Math.sqrt(drnd()) * (cfg.wallRadius - 20);
+        const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
+        if (colliders.some((c) => x > c.min.x - 2 && x < c.max.x + 2 && z > c.min.z - 2 && z < c.max.z + 2 && c.min.y < 1)) continue;
+        const k = drnd();
+        if (k < 0.45) bushes.push([x, z, 1.2 + drnd() * 1.6]);
+        else if (k < 0.85) flowers.push([x, z]);
+        else shrooms.push([x, z, 0.7 + drnd() * 0.8]);
+      }
+      const m4 = new THREE.Matrix4();
+      const bush = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshStandardMaterial({ color: '#7fcf6e', roughness: 1, flatShading: true }), bushes.length);
+      bushes.forEach(([x, z, sc], i) => bush.setMatrixAt(i, m4.makeScale(sc * 1.3, sc, sc * 1.3).setPosition(x, sc * 0.6, z)));
+      const flower = new THREE.InstancedMesh(new THREE.SphereGeometry(0.35, 6, 5), new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.9 }), flowers.length);
+      const fc = ['#ff8fa3', '#ffd27a', '#b48ae0', '#ffffff', '#7fd0f0'].map((c) => new THREE.Color(c));
+      flowers.forEach(([x, z], i) => {
+        flower.setMatrixAt(i, m4.makeTranslation(x, 0.4, z));
+        flower.setColorAt(i, fc[Math.floor(drnd() * fc.length)]);
+      });
+      const stem = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.35, 0.45, 1.2, 8).translate(0, 0.6, 0), new THREE.MeshStandardMaterial({ color: '#fff3df', roughness: 1 }), shrooms.length);
+      const capM = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#ff6f61', roughness: 0.8 }), shrooms.length);
+      shrooms.forEach(([x, z, sc], i) => {
+        stem.setMatrixAt(i, m4.makeScale(sc, sc, sc).setPosition(x, 0, z));
+        capM.setMatrixAt(i, m4.makeScale(sc * 1.1, sc * 0.8, sc * 1.1).setPosition(x, 1.1 * sc, z));
+      });
+      bush.castShadow = !lowSpec;
+      scene.add(bush, flower, stem, capM);
+    }
     function addTree(x, z, r, h) {
       const trunk = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.75, r * 1.15, h, 10), bark);
       trunk.position.set(x, h / 2, z);
