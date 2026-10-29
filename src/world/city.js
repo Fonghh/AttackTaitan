@@ -215,6 +215,96 @@ export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings
       }
     : null;
 
+  // 卡通風的造型變化（另一組亂數）：階梯高樓、斜屋頂、圓頂、陽台、屋頂花園、屋頂看板
+  const drnd = mulberry32(4242);
+  const decoMats = toon
+    ? {
+        roofs: ['#f08a7e', '#7cc4c9', '#f4b860', '#9b8fd9', '#8fcf8a'].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.8 })),
+        white: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.8 }),
+        grass: new THREE.MeshStandardMaterial({ color: '#9fdc84', roughness: 1 }),
+        board: ['#ff8fa3', '#7fd0f0', '#ffd27a', '#b8e08a'].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.7, emissive: c, emissiveIntensity: 0.2 })),
+      }
+    : null;
+  function decorateBuilding(x, z, w, d, h, wm) {
+    const r = drnd();
+    let roofTaken = false;
+    const nearSpawn = Math.hypot(x - spawn.x, z - spawn.z) < 100; // 起點附近保持原樣（起跳的第一勾不受影響）
+    if (h > 38 && r < 0.3 && !nearSpawn) {
+      // 階梯高樓：屋頂再疊一層較小的樓（可勾、可碰撞）
+      const tw = w * 0.62, td = d * 0.62, th = 8 + drnd() * 10;
+      const tg = roundedBoxWithWorldUV(tw, th, td, Math.min(1.2, Math.min(tw, td) * 0.07));
+      const tier = new THREE.Mesh(wallRoofGroups(tg), [wm, roofMat]);
+      tier.position.set(x, h + th / 2, z);
+      tier.castShadow = tier.receiveShadow = true;
+      tier.userData.building = true;
+      scene.add(tier);
+      hookables.push(tier);
+      colliders.push({ min: new THREE.Vector3(x - tw / 2, h, z - td / 2), max: new THREE.Vector3(x + tw / 2, h + th, z + td / 2) });
+      if (drnd() < 0.5) {
+        const dome = new THREE.Mesh(new THREE.SphereGeometry(Math.min(tw, td) * 0.38, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), decoMats.roofs[Math.floor(drnd() * 5)]);
+        dome.position.set(x, h + th, z);
+        addProp(dome);
+      }
+      roofTaken = true;
+    } else if (h < 32 && r < 0.62) {
+      // 斜屋頂（三角柱），顏色隨機
+      const along = w > d;
+      const len = (along ? w : d) + 0.6, span = (along ? d : w) + 0.6;
+      const rh = Math.min(7, span * 0.38);
+      const prism = new THREE.CylinderGeometry(1, 1, 1, 3, 1);
+      prism.rotateZ(Math.PI / 2).rotateX(-Math.PI / 2); // 軸沿 x、尖端朝上（高 -0.5～1、寬 1.73）
+      const roof = new THREE.Mesh(prism, decoMats.roofs[Math.floor(drnd() * 5)]);
+      roof.scale.set(len, rh / 1.5, span / 1.73);
+      roof.rotation.y = along ? 0 : Math.PI / 2;
+      roof.position.set(x, h + 0.5 * (rh / 1.5) + 0.3, z);
+      addProp(roof);
+      // 煙囪
+      const ch = new THREE.Mesh(new THREE.BoxGeometry(1.4, 3, 1.4), decoMats.white);
+      ch.position.set(x + (along ? w * 0.25 : 0), h + rh * 0.6, z + (along ? 0 : d * 0.25));
+      addProp(ch);
+      roofTaken = true;
+    } else if (r < 0.8) {
+      // 屋頂花園：草皮＋幾叢灌木
+      const lawn = new THREE.Mesh(new THREE.BoxGeometry(w - 2, 0.4, d - 2), decoMats.grass);
+      lawn.position.set(x, h + 0.2, z);
+      addProp(lawn);
+      for (let i = 0; i < 4; i++) {
+        const b = new THREE.Mesh(new THREE.IcosahedronGeometry(1 + drnd() * 0.9, 1), propMats.bush);
+        b.position.set(x + (drnd() - 0.5) * (w - 5), h + 1, z + (drnd() - 0.5) * (d - 5));
+        addProp(b);
+      }
+      roofTaken = true;
+    } else if (h > 20) {
+      // 屋頂看板
+      const bw = Math.min(w * 0.7, 12);
+      const board = new THREE.Mesh(new RoundedBoxGeometry(bw, 4.5, 0.6, 2, 0.25), decoMats.board[Math.floor(drnd() * 4)]);
+      board.position.set(x, h + 4.6, z);
+      board.rotation.y = drnd() < 0.5 ? 0 : Math.PI / 2;
+      addProp(board);
+      for (const sx of [-1, 1]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.4, 2.6, 0.4), decoMats.white);
+        leg.position.set(x + (board.rotation.y ? 0 : sx * bw * 0.35), h + 1.3, z + (board.rotation.y ? sx * bw * 0.35 : 0));
+        addProp(leg);
+      }
+    }
+    // 陽台：其中一面每隔 6m 一條白色陽台（中高樓）
+    if (h > 18 && drnd() < 0.45) {
+      const side = Math.floor(drnd() * 4);
+      for (let y = 9; y < h - 3; y += 6) {
+        const bw = (side < 2 ? w : d) * 0.55;
+        const geo = new THREE.BoxGeometry(side < 2 ? bw : 1.6, 0.35, side < 2 ? 1.6 : bw);
+        const b = new THREE.Mesh(geo, decoMats.white);
+        const off = (side < 2 ? d : w) / 2 + 0.8;
+        b.position.set(x + (side === 2 ? off : side === 3 ? -off : 0), y, z + (side === 0 ? off : side === 1 ? -off : 0));
+        addProp(b);
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(side < 2 ? bw : 0.15, 1, side < 2 ? 0.15 : bw), decoMats.white);
+        rail.position.set(b.position.x + (side === 2 ? 0.75 : side === 3 ? -0.75 : 0), y + 0.6, b.position.z + (side === 0 ? 0.75 : side === 1 ? -0.75 : 0));
+        addProp(rail);
+      }
+    }
+    return roofTaken;
+  }
+
   function addBuilding(x, z, w, d, h, plain = false) {
     const wm = wallMats[Math.floor(rnd() * wallMats.length)];
     const geo = toon ? roundedBoxWithWorldUV(w, h, d, Math.min(1.4, Math.min(w, d) * 0.07)) : boxWithWorldUV(w, h, d);
@@ -241,8 +331,12 @@ export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings
       const m = new THREE.Mesh(new THREE.BoxGeometry(a, b, c), trimMat);
       m.position.set(x + ox, h + ph / 2, z + oz);
       m.castShadow = !lowSpec;
-      scene.add(m);
+      if (toon) addProp(m);
+      else scene.add(m);
     }
+    // 卡通風：造型變化（用另一組亂數，不影響建築配置）
+    let roofTaken = false;
+    if (toon && !plain) roofTaken = decorateBuilding(x, z, w, d, h, wm);
     // 卡通風：一樓的彩色遮雨棚＋招牌、屋頂的冷氣／水塔／盆栽
     if (toon && !plain) {
       if (h > 12) {
@@ -257,6 +351,7 @@ export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings
         sign.position.set(x + ox * (side < 2 ? 1 : 0.62), 6.4, z + oz * (side < 2 ? 0.62 : 1));
         addProp(sign);
       }
+      // 屋頂被花園／斜屋頂佔用時不放小物，但亂數照抽（不然後面整座城的配置都會跟著變）
       const n = 1 + Math.floor(rnd() * 3);
       for (let i = 0; i < n; i++) {
         const px = x + (rnd() - 0.5) * (w - 5), pz = z + (rnd() - 0.5) * (d - 5);
@@ -272,7 +367,7 @@ export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings
           m = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 1), propMats.bush);
           m.position.set(px, h + 1.0, pz);
         }
-        addProp(m);
+        if (!roofTaken) addProp(m);
       }
     }
     // 屋頂小屋 / 水塔，增加輪廓
@@ -483,18 +578,76 @@ export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings
         }
       }
     }
+    // 三種樹：圓樹（綠）、櫻花樹（粉紅）、松樹（疊起來的圓錐）；用另一組亂數分配，不影響配置
+    const kinds = trees.map(() => drnd());
     const tm = new THREE.InstancedMesh(trunkGeo, new THREE.MeshStandardMaterial({ color: '#b07a52', roughness: 1 }), trees.length);
-    const cm = new THREE.InstancedMesh(crownGeo, new THREE.MeshStandardMaterial({ color: '#8fd27a', roughness: 1, flatShading: true }), trees.length);
+    const pineGeo = mergeGeometries([new THREE.ConeGeometry(2.4, 3.2, 8).translate(0, -0.6, 0), new THREE.ConeGeometry(1.8, 2.8, 8).translate(0, 1.1, 0), new THREE.ConeGeometry(1.1, 2.2, 8).translate(0, 2.5, 0)]);
+    const lists = [[], [], []];
+    trees.forEach((t, i) => lists[kinds[i] < 0.55 ? 0 : kinds[i] < 0.78 ? 1 : 2].push(i));
+    const crowns = [
+      new THREE.InstancedMesh(crownGeo, new THREE.MeshStandardMaterial({ color: '#8fd27a', roughness: 1, flatShading: true }), lists[0].length),
+      new THREE.InstancedMesh(crownGeo, new THREE.MeshStandardMaterial({ color: '#ffb7cf', roughness: 1, flatShading: true }), lists[1].length),
+      new THREE.InstancedMesh(pineGeo, new THREE.MeshStandardMaterial({ color: '#5fb987', roughness: 1, flatShading: true }), lists[2].length),
+    ];
     const m4 = new THREE.Matrix4();
+    const scales = trees.map(() => 0.8 + rnd() * 0.5);
     trees.forEach(([x, z], i) => {
-      const s = 0.8 + rnd() * 0.5;
+      const s = scales[i];
       m4.makeScale(s, s, s).setPosition(x, 1.5 * s, z);
       tm.setMatrixAt(i, m4);
-      m4.makeScale(s, s * 0.9, s).setPosition(x, 4.6 * s, z);
-      cm.setMatrixAt(i, m4);
     });
-    tm.castShadow = cm.castShadow = !lowSpec;
-    scene.add(tm, cm);
+    lists.forEach((list, k) => {
+      list.forEach((i, j) => {
+        const [x, z] = trees[i];
+        const s = scales[i];
+        if (k === 2) m4.makeScale(s, s, s).setPosition(x, 4.4 * s, z);
+        else m4.makeScale(s * (k === 1 ? 1.1 : 1), s * 0.9, s * (k === 1 ? 1.1 : 1)).setPosition(x, 4.6 * s, z);
+        crowns[k].setMatrixAt(j, m4);
+      });
+      crowns[k].castShadow = !lowSpec;
+    });
+    tm.castShadow = !lowSpec;
+    scene.add(tm, ...crowns);
+    // 路燈（路口四角）＋花圃（人行道上）
+    const lamps = [];
+    const beds = [];
+    for (const a of lines) {
+      for (const b of lines) {
+        if (Math.abs(a) < 52 && Math.abs(b) < 52) continue;
+        if (Math.hypot(a, b) > R - 14) continue;
+        for (const [ox, oz] of [[9.2, 9.2], [-9.2, -9.2]]) {
+          const x = a + ox, z = b + oz;
+          if (colliders.some((c) => x > c.min.x - 1 && x < c.max.x + 1 && z > c.min.z - 1 && z < c.max.z + 1)) continue;
+          lamps.push([x, z]);
+        }
+        if (drnd() < 0.6) {
+          const x = a + 9.6, z = b + 20 + drnd() * 6;
+          if (!colliders.some((c) => x > c.min.x - 2 && x < c.max.x + 2 && z > c.min.z - 3 && z < c.max.z + 3)) beds.push([x, z]);
+        }
+      }
+    }
+    const poleGeo = new THREE.CylinderGeometry(0.15, 0.2, 6, 6).translate(0, 3, 0);
+    const bulbGeo = new THREE.SphereGeometry(0.55, 10, 8);
+    const pole = new THREE.InstancedMesh(poleGeo, new THREE.MeshStandardMaterial({ color: '#5d6b80', roughness: 0.7 }), lamps.length);
+    const bulb = new THREE.InstancedMesh(bulbGeo, new THREE.MeshStandardMaterial({ color: '#fff4c8', emissive: '#ffe08a', emissiveIntensity: 0.8 }), lamps.length);
+    lamps.forEach(([x, z], i) => {
+      pole.setMatrixAt(i, m4.makeTranslation(x, 0, z));
+      bulb.setMatrixAt(i, m4.makeTranslation(x, 6.3, z));
+    });
+    scene.add(pole, bulb);
+    const bedGeo = new RoundedBoxGeometry(1.6, 0.7, 5, 2, 0.25);
+    const flowerGeo = new THREE.SphereGeometry(0.32, 6, 5);
+    const bed = new THREE.InstancedMesh(bedGeo, new THREE.MeshStandardMaterial({ color: '#f3e3c8', roughness: 1 }), beds.length);
+    const flowers = new THREE.InstancedMesh(flowerGeo, new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.9 }), beds.length * 6);
+    const fc = ['#ff8fa3', '#ffd27a', '#b48ae0', '#ffffff', '#ff6f61'].map((c) => new THREE.Color(c));
+    beds.forEach(([x, z], i) => {
+      bed.setMatrixAt(i, m4.makeTranslation(x, 0.35, z));
+      for (let k = 0; k < 6; k++) {
+        flowers.setMatrixAt(i * 6 + k, m4.makeTranslation(x + (drnd() - 0.5) * 0.9, 0.85, z - 2 + k * 0.8));
+        flowers.setColorAt(i * 6 + k, fc[Math.floor(drnd() * fc.length)]);
+      }
+    });
+    scene.add(bed, flowers);
   }
 
   // 外圍城牆（內側可勾索）

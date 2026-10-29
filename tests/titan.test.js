@@ -37,3 +37,52 @@ test('toon titans: the nape sticks out of the big head and the chest collision s
     }
   }
 });
+
+const fakePlayer = (x, y, z) => ({ pos: new Vector3(x, y, z), vel: new Vector3(), hp: 100 });
+
+test('thrower: raises a rock, throws it along a parabola and hits a player standing still', () => {
+  const t = new Titan(new Scene(), CONFIG, { name: '投石', kind: 'thrower', x: 0, z: 0, scale: 1 });
+  t.attackCooldown = 0;
+  const p = fakePlayer(0, 2, 60);
+  const ev = [];
+  for (let i = 0; i < 60 * 5 && !ev.some((e) => e.type === 'rockHit'); i++) {
+    t.update(1 / 60, p, { colliders: [] });
+    ev.push(...t.events.splice(0));
+  }
+  const types = ev.map((e) => e.type);
+  assert.ok(types.includes('throwWindup') && types.includes('throw'), types.join(','));
+  assert.ok(types.includes('rockHit'), `rock hits a standing player (${types.join(',')})`);
+});
+
+test('armored: nape plates absorb the first hits, then break', () => {
+  const t = new Titan(new Scene(), CONFIG, { name: '鎧甲', kind: 'armored', x: 0, z: 0 });
+  const A = CONFIG.titan.armored;
+  t.takeHit(60, true);
+  assert.ok(t.hp > CONFIG.titan.hp - 60 * A.damageScale - 1e-6 && t.armor === A.plates - 1);
+  for (let i = 1; i < A.plates; i++) t.takeHit(60, true);
+  assert.equal(t.armor, 0);
+  assert.ok(t.events.some((e) => e.type === 'armorBreak') && !t.napeArmor.visible);
+  const hp = t.hp;
+  t.takeHit(30, true);
+  assert.equal(t.hp, Math.max(0, hp - 30), 'full damage after the armor is gone');
+});
+
+test('steam: charges, bursts, pushes a nearby player away and burns once', () => {
+  const t = new Titan(new Scene(), CONFIG, { name: '蒸氣', kind: 'steam', x: 0, z: 0 });
+  t.root.updateMatrixWorld(true);
+  const nape = t.napeWorld(new Vector3());
+  const p = fakePlayer(nape.x, nape.y, nape.z - 6);
+  t.steamT = CONFIG.titan.steam.interval;
+  const ev = [];
+  for (let i = 0; i < 60 * 3; i++) {
+    p.vel.set(0, 0, 0);
+    t.update(1 / 60, p, { colliders: [] });
+    ev.push(...t.events.splice(0));
+    if (t.steamPhase === 'burst') break;
+  }
+  t.update(1 / 60, p, { colliders: [] });
+  ev.push(...t.events.splice(0));
+  assert.ok(ev.some((e) => e.type === 'steamWindup') && ev.some((e) => e.type === 'steamBurst'));
+  assert.ok(ev.filter((e) => e.type === 'steamHit').length === 1);
+  assert.ok(p.vel.z < -0.5, `pushed away from the nape (vz ${p.vel.z.toFixed(2)})`);
+});

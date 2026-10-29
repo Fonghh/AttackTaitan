@@ -110,6 +110,22 @@ export const LEVELS = [
     ],
     stars: [{ type: 'clear' }, { type: 'time', max: 300 }, { type: 'nohit' }],
   },
+  {
+    id: 'variety',
+    name: '特殊巨人',
+    map: 'city',
+    objective: 'kill',
+    brief: '三種新巨人：投石巨人（遠遠丟石頭，看到警告就閃開）、鎧甲巨人（後頸有水晶鎧甲，先砍兩下砍碎）、蒸氣巨人（全身發紅時快離開，噴完再砍）。全部討伐。',
+    spawn: CONFIG.player.spawn,
+    faceTo: { x: 0, z: 0 },
+    titans: [
+      { name: '投石巨人', kind: 'thrower', x: 0, z: -20, yaw: 0, scale: 1.1, homeRadius: 20 },
+      { name: '鎧甲巨人', kind: 'armored', x: 100, z: 50, yaw: -1.2, scale: 1.25, homeRadius: 26 },
+      { name: '蒸氣巨人', kind: 'steam', x: -100, z: 0, yaw: 1.2, scale: 1.2, homeRadius: 26 },
+      { name: '北街投石巨人', kind: 'thrower', x: -50, z: -150, yaw: 0.3, scale: 0.95, homeRadius: 20 },
+    ],
+    stars: [{ type: 'clear' }, { type: 'time', max: 360 }, { type: 'nohit' }],
+  },
 ];
 
 export function getLevel(id) {

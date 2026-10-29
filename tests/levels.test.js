@@ -7,12 +7,13 @@ const memStorage = () => {
   return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)) };
 };
 
-test('levels: 4 levels in order, each with 3 star rules', () => {
-  assert.deepEqual(LEVELS.map((l) => l.id), ['controls', 'training', 'city', 'rings', 'forest']);
+test('levels: 6 levels in order, each with 3 star rules', () => {
+  assert.deepEqual(LEVELS.map((l) => l.id), ['controls', 'training', 'city', 'rings', 'forest', 'variety']);
   for (const l of LEVELS) assert.equal(l.stars.length, 3, l.id);
   assert.equal(nextLevel('controls').id, 'training');
   assert.equal(nextLevel('training').id, 'city');
-  assert.equal(nextLevel('forest'), null);
+  assert.equal(nextLevel('forest').id, 'variety');
+  assert.equal(nextLevel('variety'), null);
   assert.equal(getLevel('nope'), null);
 });
 

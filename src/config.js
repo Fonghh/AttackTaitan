@@ -242,6 +242,23 @@ export const CONFIG = {
       recover: 1.4, // 落地後的硬直（趁機砍）
       cooldown: 4,
     },
+    // 投石巨人：保持距離，舉起石頭預判玩家位置丟過來（拋物線），靠太近才用手揮
+    thrower: {
+      range: 115, // 這個距離內（× 體型）會丟
+      minRange: 18, // 比這更近改用揮擊
+      windup: 1.1, // 舉石頭（有警告）
+      throwSpeed: 52, // 石頭初速（水平方向的平均速度）
+      gravity: 20,
+      rockRadius: 1.5,
+      hitRadius: 2.4, // 石頭中心離玩家這麼近＝打中
+      damage: 22,
+      knock: 20,
+      cooldown: 3.4,
+    },
+    // 鎧甲巨人：後頸有水晶鎧甲，要先砍碎（每砍一下扣一片）才傷得到；鎧甲還在時傷害只剩一成五
+    armored: { plates: 2, damageScale: 0.15, walkFactor: 0.75 },
+    // 蒸氣巨人：每隔一段時間全身發熱 → 噴出蒸氣，把附近的人吹開並燙傷；噴完有空檔
+    steam: { interval: 6.5, windup: 1.1, burst: 2.4, radius: 17, push: 70, damage: 8 },
     // 死亡後屍體淡出
     fadeDelay: 3,
     fadeTime: 2,
@@ -319,7 +336,7 @@ export const CONFIG = {
     hair: '#5b3a28',
     hairStyle: 'spiky', // 'short' 短髮 | 'spiky' 刺刺頭 | 'ponytail' 馬尾 | 'bob' 鮑伯頭
     eyes: 'round', // 'round' 圓眼 | 'sharp' 銳利 | 'sleepy' 瞇瞇眼
-    eyeColor: '#2a2638',
+    eyeColor: '#2a2638', irisColor: '#2f9fbf', // 眼線／瞳孔顏色、虹膜顏色
     blush: true, // 臉頰腮紅
     jacket: '#d99a5f',
     pants: '#fff3df',

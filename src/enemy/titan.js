@@ -2,6 +2,7 @@
 // 部位效果（砍眼睛＝暈眩、砍腳＝跪下）、地盤範圍與建築碰撞、死亡後淡出。
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { makeMat, addOutlines, outlineMaterial } from '../fx/toon.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -49,6 +50,9 @@ function makeLook(spawn, kind, dummy) {
     // 奇行種：瘦長、大頭、大眼、咧嘴笑
     Object.assign(look, { body: 'lanky', girth: 0.72, torso: 0.82, belly: 1, headScale: 1.3, eyeSize: 1.35, face: 'grin' });
   }
+  if (kind === 'thrower') Object.assign(look, { body: 'lanky', girth: 0.85, torso: 0.9, belly: 1, face: 'angry', hair: look.hair === 'bald' ? 'messy' : look.hair });
+  if (kind === 'armored') Object.assign(look, { body: 'stocky', girth: 1.2, torso: 1.15, belly: 1.05, face: 'blank', hair: 'short', tint: '#c8a68e' });
+  if (kind === 'steam') Object.assign(look, { body: 'stocky', girth: 1.15, torso: 1.1, belly: 1.4, face: 'angry', hair: 'bald', tint: '#e48f7a' });
   if (dummy) Object.assign(look, { tint: '#a8764a', hair: 'bald', face: 'blank', hairColor: '#5a3a20', girth: 1, torso: 1, belly: 1 });
   if (spawn.tint) look.tint = spawn.tint;
   if (spawn.hair) look.hairColor = spawn.hair;
@@ -61,6 +65,7 @@ export class Titan {
    */
   constructor(scene, cfg, spawn) {
     this.cfg = cfg;
+    this.scene = scene;
     this.spawn = spawn;
     this.scale = spawn.scale ?? 1;
     this.name = spawn.name ?? '巨人';
@@ -68,6 +73,7 @@ export class Titan {
     this.kind = spawn.kind ?? 'normal'; // 'normal' | 'abnormal'（奇行種）
     this.dummy = !!spawn.dummy; // 訓練用木人：木頭色、不會動、不會死（被砍到剩 1 血後自動恢復）
     const look = (this.look = makeLook(spawn, this.kind, this.dummy));
+    const T0 = cfg.titan;
     const toon = (this.toon = cfg.style === 'toon'); // 卡通畫風：Q 版大頭、大眼、粉彩膚色、沒有肌肉線條
     const g = look.girth * (toon ? 1.15 : 1); // 四肢粗細（卡通版肉肉的）
     const gt = look.torso; // 軀幹寬度
@@ -75,25 +81,25 @@ export class Titan {
     // 每隻巨人自己的材質（受擊閃紅、死亡淡出不會互相影響）
     const tint = toon ? '#' + new THREE.Color(look.tint).lerp(new THREE.Color('#fff1e6'), 0.42).getHexString() : look.tint;
     const flat = !toon;
-    this.skin = new THREE.MeshStandardMaterial({ color: tint, roughness: toon ? 0.85 : 0.72, flatShading: flat, emissive: '#000000' });
-    const shade = new THREE.MeshStandardMaterial({ color: new THREE.Color(tint).multiplyScalar(0.8), roughness: 0.8, flatShading: flat });
-    const hairMat = new THREE.MeshStandardMaterial({ color: toon ? new THREE.Color(look.hairColor).lerp(new THREE.Color('#ffffff'), 0.12) : look.hairColor, roughness: toon ? 0.8 : 1, flatShading: flat });
+    this.skin = makeMat(toon, { color: tint, roughness: toon ? 0.85 : 0.72, flatShading: flat, emissive: '#000000' });
+    const shade = makeMat(toon, { color: new THREE.Color(tint).multiplyScalar(0.8), roughness: 0.8, flatShading: flat });
+    const hairMat = makeMat(toon, { color: toon ? new THREE.Color(look.hairColor).lerp(new THREE.Color('#ffffff'), 0.12) : look.hairColor, roughness: toon ? 0.8 : 1, flatShading: flat });
     // 眼睛（eyeWorld 用）：寫實版是發光的眼珠；卡通版是黑色瞳孔（眼白另外做）
     this.eyeColors = toon ? ['#2a2233', '#c23a5a'] : ['#fff7d6', '#5a1010']; // [平常, 暈眩]
     this.eyeGlow = toon ? 0.05 : 0.6;
-    this.eyeMat = new THREE.MeshStandardMaterial({ color: this.eyeColors[0], emissive: toon ? '#2a2233' : '#ffd27a', emissiveIntensity: this.eyeGlow, roughness: 0.3 });
-    const socketMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(tint).multiplyScalar(0.45), roughness: 1, flatShading: flat });
-    const mouthMat = new THREE.MeshStandardMaterial({ color: toon ? '#8a3346' : '#3b1414', roughness: 1 });
-    const toothMat = new THREE.MeshStandardMaterial({ color: '#f1ead8', roughness: 0.6 });
+    this.eyeMat = makeMat(toon, { color: this.eyeColors[0], emissive: toon ? '#2a2233' : '#ffd27a', emissiveIntensity: this.eyeGlow, roughness: 0.3 });
+    const socketMat = makeMat(toon, { color: new THREE.Color(tint).multiplyScalar(0.45), roughness: 1, flatShading: flat });
+    const mouthMat = makeMat(toon, { color: toon ? '#8a3346' : '#3b1414', roughness: 1 });
+    const toothMat = makeMat(toon, { color: '#f1ead8', roughness: 0.6 });
     this.napeMat = new THREE.MeshStandardMaterial({ color: '#ff6a2a', emissive: '#ff4a10', emissiveIntensity: 1.6, roughness: 0.4 });
     this.handMatR = this.skin.clone();
     this.handMatL = this.skin.clone();
-    const whiteMat = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#ffffff', emissiveIntensity: 0.25, roughness: 0.4 });
-    const blushMat = new THREE.MeshStandardMaterial({ color: '#ff9db0', roughness: 0.9, transparent: true, opacity: 0.85 });
-    const tongueMat = new THREE.MeshStandardMaterial({ color: '#ff7f94', roughness: 0.7 });
+    const whiteMat = makeMat(toon, { color: '#ffffff', emissive: '#ffffff', emissiveIntensity: 0.25, roughness: 0.4 });
+    const blushMat = makeMat(toon, { color: '#ff9db0', roughness: 0.9, transparent: true, opacity: 0.85 });
+    const tongueMat = makeMat(toon, { color: '#ff7f94', roughness: 0.7 });
     // 卡通版穿一件粉彩短褲（顏色依名字固定）；木人不穿
     const SHORTS = ['#8fc9f0', '#f5a3b5', '#a8dba0', '#ffd27a', '#c3a8ec', '#ffb38a'];
-    const shortsMat = new THREE.MeshStandardMaterial({ color: look.shorts || SHORTS[hashStr(this.name) % SHORTS.length], roughness: 0.85 });
+    const shortsMat = makeMat(toon, { color: look.shorts || SHORTS[hashStr(this.name) % SHORTS.length], roughness: 0.85 });
     const wearShorts = toon && !this.dummy;
     this.materials = [this.skin, shade, hairMat, this.eyeMat, socketMat, mouthMat, toothMat, this.napeMat, this.handMatR, this.handMatL, whiteMat, blushMat, tongueMat, shortsMat];
 
@@ -246,7 +252,15 @@ export class Titan {
     }
     // 頭髮
     if (look.hair !== 'bald') add(H, new THREE.SphereGeometry(1.85, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.5).scale(1, 1.1, 1.1), hairMat, 0, 0.75, -0.1);
-    if (look.hair === 'long') {
+    if (toon && look.hair !== 'bald') {
+      // 卡通瀏海：額頭上三團圓圓的頭髮
+      for (const [x, sc] of [[-0.75, 0.9], [0, 1.05], [0.75, 0.9]]) add(H, sph(0.62 * sc, 10, 8).scale(1.25, 0.75, 0.6), hairMat, x, 1.92 - Math.abs(x) * 0.2, 1.12 - Math.abs(x) * 0.3);
+    }
+    if (look.hair === 'long' && toon) {
+      // 卡通長髮：後腦垂下來的圓弧髮片＋兩側垂到肩膀的髮束
+      add(H, new THREE.SphereGeometry(1.92, 16, 12, Math.PI, Math.PI, Math.PI * 0.25, Math.PI * 0.7).scale(1.05, 1.45, 1.08), hairMat, 0, 0.35, -0.05);
+      for (const sx of [1, -1]) add(H, cap(0.48, 2.0).scale(1, 1, 0.8), hairMat, 1.72 * sx, -0.25, 0.35, 0, 0, 0.08 * sx);
+    } else if (look.hair === 'long') {
       add(H, new THREE.BoxGeometry(3.2, 3.2, 0.5), hairMat, 0, -0.4, -1.55);
       for (const sx of [1, -1]) add(H, new THREE.BoxGeometry(0.5, 2.6, 1.6), hairMat, 1.75 * sx, -0.1, -0.3);
     } else if (look.hair === 'messy') {
@@ -255,13 +269,51 @@ export class Titan {
         add(H, new THREE.ConeGeometry(0.45, 1.3, 5), hairMat, Math.sin(a) * 1.3, 2.25, Math.cos(a) * 1.1 - 0.2, Math.cos(a) * 0.7, 0, -Math.sin(a) * 0.7);
       }
     }
+    // 種類專屬的外觀
+    if (this.kind === 'thrower') {
+      // 頭帶＋手上（舉起時才出現）的石頭
+      add(H, new THREE.TorusGeometry(1.82, 0.16, 6, 28).rotateX(Math.PI / 2), makeMat(toon, { color: '#e2574c' }), 0, 1.25, 0);
+      add(H, new THREE.BoxGeometry(0.5, 0.9, 0.15), makeMat(toon, { color: '#e2574c' }), 0.3, 1.0, -1.85, 0.3, 0, 0.4);
+    }
+    if (this.kind === 'armored') {
+      // 水晶鎧甲：肩甲、胸甲、前臂護甲（後頸的鎧甲另外做，會被砍碎）
+      this.armorMat = makeMat(toon, { color: toon ? '#9fd4ff' : '#b8c6d4', emissive: toon ? '#3a7fc0' : '#1a2430', emissiveIntensity: 0.35, roughness: 0.3, metalness: 0.4 });
+      for (const arm of [this.armL, this.armR]) {
+        add(arm.shoulder, new THREE.SphereGeometry(1.55 * g, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), this.armorMat, 0, 0.15, 0);
+        add(arm.elbow, cap(0.95 * g, 1.6), this.armorMat, 0, -2.2, 0);
+      }
+      add(this.chest, sph(2.95, 14, 10).scale(1.18 * gt, 0.6, 0.55 * gt), this.armorMat, 0, 0.9, 0.75 * gt);
+      this.materials.push(this.armorMat);
+    }
+    if (this.kind === 'steam') {
+      // 背上的散熱孔（噴蒸氣的地方）
+      const ventMat = makeMat(toon, { color: '#7a3b33' });
+      for (const sx of [1, -1]) for (const y of [0.4, 1.4]) add(this.chest, sph(0.45, 8, 6).scale(1, 0.6, 0.4), ventMat, 1.1 * sx * gt, y, -2.2 * gt);
+      this.materials.push(ventMat);
+    }
     flush();
+    if (this.kind === 'thrower') {
+      this.rockMat = makeMat(toon, { color: toon ? '#b9a48e' : '#7d7266', flatShading: true });
+      this.materials.push(this.rockMat);
+      this.heldRock = new THREE.Mesh(new THREE.IcosahedronGeometry(T0.thrower.rockRadius / Math.max(0.5, this.scale), 0), this.rockMat);
+      this.heldRock.position.set(0, -4.6, 0.8);
+      this.heldRock.visible = false;
+      this.armR.elbow.add(this.heldRock);
+    }
 
     // 弱點：後頸發光區（巨人面向 +Z，背後為 -Z）。不用點光源（多隻巨人時手機吃不消），靠自發光
     this.nape = part(new THREE.SphereGeometry(1, 16, 12).scale(1.0, 0.75, 0.45), this.napeMat, 0, toon ? 0.9 : 1.0, toon ? -1.2 : -0.95);
     this.nape.castShadow = false;
     this.nape.userData.nape = true;
     this.neck.add(this.nape);
+    if (this.kind === 'armored') {
+      // 後頸鎧甲：蓋住弱點，砍碎之前弱點幾乎無效
+      this.napeArmor = new THREE.Mesh(new THREE.SphereGeometry(1.35, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.6).rotateX(-Math.PI / 2).scale(1.15, 1.0, 0.75), this.armorMat);
+      this.napeArmor.position.copy(this.nape.position);
+      this.napeArmor.position.z -= 0.15;
+      this.napeArmor.userData.armor = true;
+      this.neck.add(this.napeArmor);
+    }
 
     scene.add(this.root);
     this.root.traverse((o) => {
@@ -270,6 +322,13 @@ export class Titan {
         o.userData.titan = this;
       }
     });
+    // 卡通畫風：身體、頭髮、短褲加深色描邊（臉上的小零件、後頸弱點不加）
+    if (toon) {
+      this.outlineMat = outlineMaterial(0.07, '#4a2f36');
+      const noLine = new Set([this.eyeMat, whiteMat, blushMat, tongueMat, mouthMat, this.napeMat]);
+      addOutlines(this.root, this.outlineMat, (o) => noLine.has(o.material));
+      this.materials.push(this.outlineMat);
+    }
 
     // 碰撞球（相對各部位，半徑為未縮放值）
     // 依體型調整：四肢 × 粗細、軀幹 × 寬度、頭 × 頭的大小
@@ -310,6 +369,15 @@ export class Titan {
     this.regenTimer = 0;
     this.leap = null;
     this.leapHit = false;
+    // 種類專屬狀態
+    this.armor = this.kind === 'armored' ? T.armored.plates : 0;
+    if (this.napeArmor) this.napeArmor.visible = true;
+    for (const r of this.rocks || []) this.scene.remove(r.mesh);
+    this.rocks = [];
+    if (this.heldRock) this.heldRock.visible = false;
+    this.steamT = this.kind === 'steam' ? T.steam.interval * 0.6 : 0;
+    this.steamPhase = 'idle'; // idle | charge | burst
+    this.steamHitDone = false;
     for (const w of this.wounds || []) w.mesh.parent?.remove(w.mesh);
     this.wounds = [];
     this.deadTime = 0;
@@ -427,6 +495,15 @@ export class Titan {
 
   takeHit(damage, isNape) {
     if (!this.alive) return;
+    if (isNape && this.armor > 0) {
+      // 鎧甲巨人：先砍碎後頸的鎧甲
+      this.armor--;
+      damage *= this.cfg.titan.armored.damageScale;
+      if (this.armor === 0) {
+        this.napeArmor.visible = false;
+        this.events.push({ type: 'armorBreak' });
+      } else this.events.push({ type: 'armorHit', left: this.armor });
+    }
     this.hp = Math.max(this.dummy ? 1 : 0, this.hp - damage);
     this.regenTimer = 2.5;
     this.hitFlash = isNape ? 0.45 : 0.3;
@@ -522,6 +599,7 @@ export class Titan {
       case 'idle':
       case 'walk': {
         if (this.kind === 'abnormal' && !kneeling && this._abnormalMove(dt, player, aggro, dist, targetYaw)) break;
+        if (this.kind === 'thrower' && !kneeling && this._throwerMove(player, dist, facing, stunned, turn)) break;
         if (aggro) turn(T.turnRate * (kneeling ? 0.5 : 1));
         const reach = T.attackRange * S;
         const relH = player.pos.y / this.height;
@@ -540,7 +618,7 @@ export class Titan {
         }
         if (aggro && !kneeling && dist > T.chaseDist * S) {
           if (this.state !== 'walk') this.setState('walk');
-          _v.set(this.forward.x, 0, this.forward.z).multiplyScalar(T.walkSpeed * S * dt);
+          _v.set(this.forward.x, 0, this.forward.z).multiplyScalar(T.walkSpeed * S * dt * (this.kind === 'armored' ? T.armored.walkFactor : 1));
           pos.add(_v);
           // 地盤範圍：不會離家太遠
           const hx = pos.x - this.spawn.x, hz = pos.z - this.spawn.z;
@@ -640,6 +718,23 @@ export class Titan {
       case 'landed':
         if (this.stateTime >= T.abnormal.recover) this.setState('idle');
         break;
+      case 'throwWindup':
+        turn(T.turnRate * 1.2);
+        if (stunned) {
+          this.heldRock.visible = false;
+          this.setState('idle');
+        } else if (this.stateTime >= T.thrower.windup) {
+          this._launchRock(player);
+          this.setState('throw');
+          this.events.push({ type: 'throw' });
+        }
+        break;
+      case 'throw':
+        if (this.stateTime >= 0.55) {
+          this.setState('idle');
+          this.attackCooldown = T.thrower.cooldown;
+        }
+        break;
       case 'stagger':
         if (this.stateTime >= T.staggerTime) {
           this.setState('idle');
@@ -658,6 +753,8 @@ export class Titan {
     }
 
     if (this.alive && world && world.colliders) this._collideBuildings(world.colliders);
+    if (this.rocks.length) this._updateRocks(dt, player, world);
+    if (this.kind === 'steam') this._updateSteam(dt, player, dist);
 
     this.updatePose(dt, player);
     this.root.updateMatrixWorld(true);
@@ -695,6 +792,117 @@ export class Titan {
         this.holding = true;
         this.setState('holding');
         this.events.push({ type: 'grabbed' });
+      }
+    }
+  }
+
+  /** 投石巨人：遠了就舉石頭丟，近了交給一般揮擊（回傳 true＝這一幀已處理） */
+  _throwerMove(player, dist, facing, stunned, turn) {
+    const A = this.cfg.titan.thrower;
+    const S = this.scale;
+    if (stunned || player.hp <= 0 || dist < A.minRange * S || dist > A.range * S) return false;
+    turn(this.cfg.titan.turnRate * 1.2);
+    if (this.state !== 'idle') this.setState('idle');
+    if (this.attackCooldown <= 0 && facing > 0.6) {
+      this.setState('throwWindup');
+      this.heldRock.visible = true;
+      this.events.push({ type: 'throwWindup' });
+    }
+    return true;
+  }
+
+  /** 丟石頭：預判玩家（照目前速度）飛行時間後的位置，算出拋物線初速 */
+  _launchRock(player) {
+    const A = this.cfg.titan.thrower;
+    const from = this.heldRock.getWorldPosition(new THREE.Vector3());
+    this.heldRock.visible = false;
+    const target = new THREE.Vector3();
+    let tFly = from.distanceTo(player.pos) / A.throwSpeed;
+    for (let i = 0; i < 3; i++) {
+      tFly = Math.max(0.5, Math.min(2.4, tFly));
+      target.copy(player.pos).addScaledVector(player.vel, tFly * 0.8);
+      target.y = Math.max(0.5, target.y);
+      tFly = Math.hypot(target.x - from.x, target.z - from.z) / A.throwSpeed;
+    }
+    tFly = Math.max(0.5, Math.min(2.4, tFly));
+    const vel = new THREE.Vector3((target.x - from.x) / tFly, (target.y - from.y) / tFly + 0.5 * A.gravity * tFly, (target.z - from.z) / tFly);
+    const mesh = new THREE.Mesh(this.heldRock.geometry, this.rockMat);
+    mesh.scale.setScalar(this.scale);
+    mesh.position.copy(from);
+    mesh.castShadow = true;
+    if (this.outlineMat) {
+      const ol = new THREE.Mesh(this.heldRock.geometry, this.outlineMat);
+      ol.raycast = () => {};
+      mesh.add(ol);
+    }
+    this.scene.add(mesh);
+    this.rocks.push({ mesh, pos: mesh.position, vel, t: 0, spin: new THREE.Vector3(Math.random() * 6, Math.random() * 6, 0) });
+  }
+
+  _updateRocks(dt, player, world) {
+    const A = this.cfg.titan.thrower;
+    for (let i = this.rocks.length - 1; i >= 0; i--) {
+      const r = this.rocks[i];
+      r.t += dt;
+      r.vel.y -= A.gravity * dt;
+      r.pos.addScaledVector(r.vel, dt);
+      r.mesh.rotation.x += r.spin.x * dt;
+      r.mesh.rotation.y += r.spin.y * dt;
+      let end = null;
+      if (player.hp > 0 && r.pos.distanceTo(player.pos) < A.hitRadius) {
+        _v2.copy(r.vel).setY(0).normalize().multiplyScalar(A.knock);
+        _v2.y = 7;
+        this.events.push({ type: 'rockHit', knock: _v2.clone(), pos: r.pos.clone() });
+        end = 'hit';
+      } else if (r.pos.y < A.rockRadius * 0.6) end = 'ground';
+      else if (world?.colliders?.some((b) => r.pos.x > b.min.x && r.pos.x < b.max.x && r.pos.z > b.min.z && r.pos.z < b.max.z && r.pos.y < b.max.y)) end = 'wall';
+      else if (r.t > 6) end = 'gone';
+      if (end) {
+        if (end !== 'hit' && end !== 'gone') this.events.push({ type: 'rockLand', pos: r.pos.clone() });
+        this.scene.remove(r.mesh);
+        this.rocks.splice(i, 1);
+      }
+    }
+  }
+
+  /** 蒸氣巨人：計時 → 蓄熱（警告）→ 噴蒸氣（範圍內推開＋燙傷一次）→ 回到計時 */
+  _updateSteam(dt, player, dist) {
+    const C = this.cfg.titan.steam;
+    if (!this.alive) {
+      this.steamPhase = 'idle';
+      return;
+    }
+    this.steamT += dt;
+    if (this.steamPhase === 'idle') {
+      if (this.steamT >= C.interval && dist < 70 * this.scale && player.hp > 0) {
+        this.steamPhase = 'charge';
+        this.steamT = 0;
+        this.events.push({ type: 'steamWindup' });
+      }
+    } else if (this.steamPhase === 'charge') {
+      if (this.steamT >= C.windup) {
+        this.steamPhase = 'burst';
+        this.steamT = 0;
+        this.steamHitDone = false;
+        this.events.push({ type: 'steamBurst' });
+      }
+    } else if (this.steamPhase === 'burst') {
+      const nape = this.nape.getWorldPosition(_v);
+      const d = nape.distanceTo(player.pos);
+      const R = C.radius * this.scale;
+      if (d < R && player.hp > 0) {
+        // 往外吹：越靠近越強
+        _v2.subVectors(player.pos, nape).normalize();
+        const k = 1 - d / R;
+        player.vel.addScaledVector(_v2, C.push * (0.4 + k) * dt);
+        if (!this.steamHitDone) {
+          this.steamHitDone = true;
+          this.events.push({ type: 'steamHit' });
+        }
+      }
+      if (this.steamT >= C.burst) {
+        this.steamPhase = 'idle';
+        this.steamT = 0;
       }
     }
   }
@@ -883,15 +1091,15 @@ export class Titan {
       armRX = Math.sin(ph) * 0.35;
       pelvisY = 9 - Math.abs(Math.cos(ph)) * 0.35;
       spineX = 0.08;
-    } else if (s === 'windup') {
-      const p = Math.min(1, k / T.windup);
+    } else if (s === 'windup' || s === 'throwWindup') {
+      const p = Math.min(1, k / (s === 'windup' ? T.windup : T.thrower.windup));
       armRX = 2.3 * p;
       armRZ = -0.2 - 0.9 * p;
       elbowR = -0.6 * p;
       spineX = 0.25 * p;
       neckX = -0.15 * p;
-    } else if (s === 'swing') {
-      const p = Math.min(1, k / T.swing);
+    } else if (s === 'swing' || s === 'throw') {
+      const p = Math.min(1, k / (s === 'swing' ? T.swing : 0.3));
       armRX = 2.3 - 3.6 * p;
       armRZ = -1.1 + 1.8 * p;
       elbowR = -0.6 + 0.6 * p;
@@ -976,7 +1184,9 @@ export class Titan {
     this.eyeMat.color.set(this.eyeColors[this.stunTimer > 0 ? 1 : 0]);
     // 受擊：整隻閃紅，逐漸退回
     const hf = Math.max(0, Math.min(1, this.hitFlash / 0.25));
-    this.skin.emissive.setRGB(1.1 * hf, 0.08 * hf, 0.05 * hf);
+    // 蒸氣巨人發熱：蓄力時越來越紅，噴發時最亮
+    const heat = this.kind === 'steam' && this.alive ? (this.steamPhase === 'charge' ? Math.min(1, this.steamT / T.steam.windup) : this.steamPhase === 'burst' ? 0.8 + Math.sin(t * 20) * 0.2 : 0) : 0;
+    this.skin.emissive.setRGB(1.1 * hf + 0.55 * heat, 0.08 * hf + 0.16 * heat, 0.05 * hf + 0.04 * heat);
     // 傷口：慢慢淡掉
     for (let i = this.wounds.length - 1; i >= 0; i--) {
       const w = this.wounds[i];

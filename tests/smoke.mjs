@@ -44,7 +44,7 @@ try {
   const menu = await page.evaluate(() => {
     return [...document.querySelectorAll('#level-list .level-card')].map((b) => ({ name: b.querySelector('b').textContent, locked: b.disabled }));
   });
-  check('[levels] menu lists 5 levels (controls tutorial first), all unlocked', menu.length === 5 && menu[0].name === '操作教學' && menu.every((m) => !m.locked), JSON.stringify(menu));
+  check('[levels] menu lists 6 levels (controls tutorial first), all unlocked', menu.length === 6 && menu[0].name === '操作教學' && menu.every((m) => !m.locked), JSON.stringify(menu));
   await page.goto(`${URL_BASE}?level=city`);
   await page.waitForFunction(() => window.__game, null, { timeout: 20000 });
   await page.waitForTimeout(800);
@@ -288,7 +288,7 @@ try {
     const ls = g.titans.map((t) => `${t.look.body}/${t.look.face}/${t.look.hair}/${t.look.tint}`);
     const meshes = g.titans[0].root.children.length;
     let count = 0;
-    g.titans[0].root.traverse((o) => o.isMesh && count++);
+    g.titans[0].root.traverse((o) => o.isMesh && !o.userData.isOutline && count++); // 描邊網格另計
     return { distinct: new Set(ls).size, total: ls.length, meshesPerTitan: count };
   });
   check('titans look different from each other (body/face/hair/skin), parts merged for performance', looks.distinct === looks.total && looks.meshesPerTitan < 40, JSON.stringify(looks));

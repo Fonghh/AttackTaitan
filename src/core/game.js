@@ -1,4 +1,5 @@
 // 遊戲主控：建立各模組、處理輸入事件、主迴圈、戰鬥流程與遊戲狀態。
+import { toonifyScene } from '../fx/toon.js';
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
@@ -82,6 +83,7 @@ export class Game {
     cfg.style = this._load('artStyle', 'toon') === 'classic' ? 'classic' : 'toon';
     document.body.classList.toggle('toon', cfg.style === 'toon');
     this.city = buildCity(this.scene, cfg.world, L.spawn, this.touch, L.map, clearings, cfg.style);
+    if (cfg.style === 'toon') toonifyScene(this.scene); // 城市換成分階明暗的卡通材質
     this.pc = new PlayerController(cfg);
     this.model = new PlayerModel(this.scene, cfg);
     // 刀身與裝置的金屬反光：用簡單的室內環境當反射來源（只套在角色的金屬上）
@@ -949,7 +951,9 @@ export class Game {
     const titan = this.titan;
     const dmg = ev.damage;
     const perfect = dmg >= C.perfectDamage;
+    const armored = titan.armor > 0;
     titan.takeHit(dmg, true);
+    if (armored) label = label || '鎧甲！';
     this.stats.napeHits++;
     this._missionEvent('nape');
     if (!spin) this.model.startSlash();
@@ -991,6 +995,8 @@ export class Game {
     this.hitStop = 0.2;
     this.slowMo = this.slowMoMax = 1.2;
     this.rig.startKillCam(titan, this.napePos, this.pc);
+    this.fx.shockRing(this.napePos, 16 * titan.scale, '#ffd27a', 0.6);
+    this.fx.impactStar(this.napePos, 10, '#fff2c0', 0.32);
     const left = this.titans.filter((t) => t.alive).length;
     this.hud.toast(left === 0 ? '全部討伐完成！' : `討伐成功！還剩 ${left} 隻`, 'good big', 2.2);
     this._missionEvent('kill');
@@ -1167,6 +1173,10 @@ export class Game {
       if (t.gone) continue;
       t.update(dt, pc, world);
       for (const e of t.events.splice(0)) this._onTitanEvent(e, t);
+      // 新種類的持續特效：飛行中的石頭拖煙、蒸氣巨人蓄熱／噴發
+      for (const r of t.rocks) this.fx.rockTrail(r.pos);
+      if (t.steamPhase === 'charge') this.fx.steamCharge(t.napeWorld(_v));
+      else if (t.steamPhase === 'burst' && Math.random() < 0.5) this.fx.steamBurst(t.napeWorld(_v), this.cfg.titan.steam.radius * t.scale * 0.5);
     }
     this._pickTarget();
     const titan = this.titan;
@@ -1540,6 +1550,47 @@ export class Game {
         break;
       case 'pounceHit':
         if (!this.grab) this.pc.damage(this.cfg.titan.abnormal.damage, e.knock);
+        break;
+      case 'throwWindup':
+        if (d < 130) {
+          this.audio.play('windup');
+          this.hud.toast(`⚠ ${titan.name}舉起石頭了！`, 'warn', 1.0);
+        }
+        break;
+      case 'throw':
+        if (d < 130) this.audio.play('swing');
+        break;
+      case 'rockHit':
+        if (!this.grab) this.pc.damage(this.cfg.titan.thrower.damage, e.knock);
+        this.fx.rockShatter(e.pos, true);
+        this.rig.addShake(0.9);
+        break;
+      case 'rockLand': {
+        const rd = e.pos.distanceTo(this.pc.pos);
+        this.fx.rockShatter(e.pos, false);
+        if (rd < 60) this.rig.addShake(0.45 * (1 - rd / 60));
+        this.audio.play('land', { speed: 30 });
+        break;
+      }
+      case 'armorHit':
+        this.fx.armorShards(titan.napeWorld(_v), false);
+        this.hud.toast(`鎧甲出現裂痕！還要 ${e.left} 下`, 'warn', 1.0);
+        break;
+      case 'armorBreak':
+        this.fx.armorShards(titan.napeWorld(_v), true);
+        this.rig.addShake(0.6);
+        this.hud.toast('鎧甲碎裂！後頸露出來了！', 'good', 1.4);
+        break;
+      case 'steamWindup':
+        if (d < 80) this.hud.toast(`⚠ ${titan.name}全身發燙，快離開！`, 'warn', 1.1);
+        break;
+      case 'steamBurst':
+        this.fx.steamBurst(titan.napeWorld(_v), this.cfg.titan.steam.radius * titan.scale * 0.6);
+        this.fx.shockRing(titan.napeWorld(_v), this.cfg.titan.steam.radius * titan.scale, '#fff2ea', 0.6);
+        if (d < 70) this.rig.addShake(0.35);
+        break;
+      case 'steamHit':
+        if (!this.grab) this.pc.damage(this.cfg.titan.steam.damage, this.pc.vel.clone()); // 被蒸氣吹開（推力在巨人那邊已經加上）
         break;
       case 'pounceLand':
         if (d < 70) this.rig.addShake(0.5 * (1 - d / 70));

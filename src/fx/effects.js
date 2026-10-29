@@ -463,10 +463,21 @@ class SlashArcs {
       const nr = 2.35 - (2.35 - r) * thick;
       pa.setXY(i, Math.cos(a) * nr, Math.sin(a) * nr);
     }
+    // 漸層：外緣最亮（刀鋒）、往內變淡；刀頭亮、刀尾淡
+    const col = new Float32Array(pa.count * 3);
+    for (let i = 0; i < pa.count; i++) {
+      const x = pa.getX(i), y = pa.getY(i);
+      const r = Math.hypot(x, y), a = Math.atan2(y, x);
+      const u = Math.max(0, Math.min(1, (a + 0.25) / (Math.PI * 1.05)));
+      const edge = Math.pow(Math.max(0, Math.min(1, (r - 1.5) / 0.85)), 1.6);
+      const k = edge * (0.25 + 0.75 * u);
+      col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = k;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     for (let i = 0; i < 12; i++) {
       const m = new THREE.Mesh(
         geo,
-        new THREE.MeshBasicMaterial({ color: '#e8f6ff', transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }),
+        new THREE.MeshBasicMaterial({ color: '#e8f6ff', vertexColors: true, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }),
       );
       m.visible = false;
       scene.add(m);
@@ -625,6 +636,103 @@ export class Effects {
       this.flashes.push({ m, t: 0, max: 0.18, size: 1 });
     }
     this.fi = 0;
+    // 衝擊波圓環＋命中星芒（動漫風的「啪！」）
+    this.rings = [];
+    const ringGeo = new THREE.RingGeometry(0.82, 1, 48);
+    for (let i = 0; i < 10; i++) {
+      const m = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+      m.visible = false;
+      scene.add(m);
+      this.rings.push({ m, t: 0, max: 0.4, size: 1, face: false });
+    }
+    this.ri = 0;
+    const star = new THREE.Shape();
+    const P = 8;
+    for (let i = 0; i <= P * 2; i++) {
+      const a = (i / (P * 2)) * Math.PI * 2;
+      const r = i % 2 === 0 ? (i % 4 === 0 ? 1 : 0.62) : 0.14;
+      const x = Math.cos(a) * r, y = Math.sin(a) * r;
+      if (i === 0) star.moveTo(x, y);
+      else star.lineTo(x, y);
+    }
+    const starGeo = new THREE.ShapeGeometry(star);
+    this.stars = [];
+    for (let i = 0; i < 6; i++) {
+      const m = new THREE.Mesh(starGeo, new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false }));
+      m.visible = false;
+      m.renderOrder = 10;
+      scene.add(m);
+      this.stars.push({ m, t: 0, max: 0.2, size: 1 });
+    }
+    this.si = 0;
+  }
+
+  /** 衝擊波圓環：flat＝平放在地上；否則面向鏡頭 */
+  shockRing(pos, size, color = '#ffffff', life = 0.4, flat = false) {
+    const r = this.rings[this.ri];
+    this.ri = (this.ri + 1) % this.rings.length;
+    r.m.position.copy(pos);
+    r.m.rotation.set(flat ? -Math.PI / 2 : 0, 0, 0);
+    r.face = !flat;
+    r.m.material.color.set(color);
+    r.m.visible = true;
+    r.t = r.max = life;
+    r.size = size;
+  }
+
+  /** 命中星芒：一瞬間的八角星（長短交錯），面向鏡頭 */
+  impactStar(pos, size, color = '#ffffff', life = 0.18) {
+    const st = this.stars[this.si];
+    this.si = (this.si + 1) % this.stars.length;
+    st.m.position.copy(pos);
+    st.m.material.color.set(color);
+    st.m.visible = true;
+    st.t = st.max = life;
+    st.size = size;
+    st.rot = Math.random() * Math.PI;
+  }
+
+  /** 飛行中的石頭：身後拖一串土灰 */
+  rockTrail(pos) {
+    this.smoke.spawn({ x: pos.x + (Math.random() - 0.5), y: pos.y + (Math.random() - 0.5), z: pos.z + (Math.random() - 0.5), vx: 0, vy: 0.5, vz: 0, max: 0.6 + Math.random() * 0.4, s0: 1.0, s1: 2.6, r: 0.78, g: 0.7, b: 0.6, a: 0.45, drag: 2 });
+  }
+
+  /** 石頭砸地／砸中：碎石噴飛＋煙塵＋地面衝擊波 */
+  rockShatter(pos, hitPlayer = false) {
+    for (let i = 0; i < 26; i++) {
+      this.smoke.spawn({ x: pos.x, y: pos.y + 0.5, z: pos.z, vx: (Math.random() - 0.5) * 22, vy: 4 + Math.random() * 12, vz: (Math.random() - 0.5) * 22, max: 0.8 + Math.random() * 0.5, s0: 0.5 + Math.random() * 0.5, s1: 0.3, r: 0.55, g: 0.47, b: 0.4, a: 1, grav: 26, drag: 0.5 });
+    }
+    for (let i = 0; i < 16; i++) {
+      this.smoke.spawn({ x: pos.x + (Math.random() - 0.5) * 3, y: pos.y + Math.random(), z: pos.z + (Math.random() - 0.5) * 3, vx: (Math.random() - 0.5) * 8, vy: 1 + Math.random() * 3, vz: (Math.random() - 0.5) * 8, max: 1.2 + Math.random() * 0.8, s0: 1.5, s1: 5, r: 0.85, g: 0.8, b: 0.72, a: 0.5, drag: 1.5 });
+    }
+    this.shockRing(_v.set(pos.x, Math.max(0.15, pos.y - 0.8), pos.z), 7, '#fff1d6', 0.45, pos.y < 3);
+    if (hitPlayer) this.impactStar(pos, 3, '#ffd27a', 0.2);
+  }
+
+  /** 鎧甲被砍：水藍色的水晶碎片；碎掉時更多、加衝擊波 */
+  armorShards(pos, broken) {
+    const n = broken ? 60 : 22;
+    for (let i = 0; i < n; i++) {
+      this.glow.spawn({ x: pos.x, y: pos.y, z: pos.z, vx: (Math.random() - 0.5) * 26, vy: (Math.random() - 0.2) * 20, vz: (Math.random() - 0.5) * 26, max: 0.5 + Math.random() * 0.5, s0: 0.35 + Math.random() * 0.3, s1: 0.05, r: 0.6, g: 0.85, b: 1, grav: 24, drag: 1 });
+    }
+    this.impactStar(pos, broken ? 6 : 3.5, '#bfe8ff', broken ? 0.3 : 0.18);
+    if (broken) this.shockRing(pos, 9, '#9fd4ff', 0.5);
+  }
+
+  /** 蒸氣巨人蓄熱：身上冒出細細的熱氣 */
+  steamCharge(point) {
+    for (let i = 0; i < 3; i++) {
+      this.smoke.spawn({ x: point.x + (Math.random() - 0.5) * 5, y: point.y + (Math.random() - 0.5) * 3, z: point.z + (Math.random() - 0.5) * 5, vx: 0, vy: 4 + Math.random() * 3, vz: 0, max: 0.9, s0: 0.8, s1: 2.5, r: 1, g: 0.9, b: 0.86, a: 0.35, drag: 1 });
+    }
+  }
+
+  /** 蒸氣噴發：從後頸往四面八方噴出大團白色蒸氣 */
+  steamBurst(point, radius) {
+    for (let i = 0; i < 10; i++) {
+      const a = Math.random() * Math.PI * 2, e = (Math.random() - 0.3) * 1.2;
+      const sp = radius * (0.9 + Math.random() * 0.8);
+      this.smoke.spawn({ x: point.x, y: point.y, z: point.z, vx: Math.cos(a) * sp, vy: e * sp * 0.6 + 3, vz: Math.sin(a) * sp, max: 1 + Math.random() * 0.6, s0: 2, s1: 9, r: 1, g: 0.97, b: 0.95, a: 0.5, drag: 1.6 });
+    }
   }
 
   setPixelScale(h, fovDeg) {
@@ -641,6 +749,8 @@ export class Effects {
     f.t = f.max = 0.18;
     f.size = 1;
     f.m.material.color.set('#ffffff');
+    this.impactStar(point, 1.4, '#fff4d0', 0.14);
+    this.shockRing(point, 2.2, '#ffe9b8', 0.3);
     for (let i = 0; i < 14; i++) {
       this.glow.spawn({ x: point.x, y: point.y, z: point.z, vx: (Math.random() - 0.5) * 18, vy: (Math.random() - 0.2) * 14, vz: (Math.random() - 0.5) * 18, max: 0.25 + Math.random() * 0.2, s0: 0.25, s1: 0.05, r: 1, g: 0.8, b: 0.45, grav: 20, drag: 2 });
     }
@@ -816,6 +926,8 @@ export class Effects {
   /** 命中弱點：蒸氣、火花與噴血 */
   napeHit(point, dir, big) {
     const n = big ? 80 : 45;
+    this.impactStar(point, big ? 7 : 5, big ? '#ffd27a' : '#ffffff', big ? 0.26 : 0.2);
+    this.shockRing(point, big ? 10 : 7, big ? '#ffb070' : '#ffe0c0', 0.38);
     for (let i = 0; i < n; i++) {
       this.glow.spawn({ x: point.x, y: point.y, z: point.z, vx: dir.x * 15 + (Math.random() - 0.5) * 26, vy: (Math.random() - 0.3) * 20, vz: dir.z * 15 + (Math.random() - 0.5) * 26, max: 0.3 + Math.random() * 0.4, s0: 0.45, s1: 0.05, r: 1, g: 0.45 + Math.random() * 0.3, b: 0.2, grav: 18, drag: 1.5 });
     }
@@ -843,6 +955,30 @@ export class Effects {
     this.speedLines.update(dt, pc.pos, pc.vel, pc.speed > 1e-3 ? pc.feelSpeed / pc.speed : 1);
     this.slashes.update(dt);
     if (camera) this.streaks.update(dt, camera);
+    for (const r of this.rings) {
+      if (!r.m.visible) continue;
+      r.t -= dt;
+      const k = Math.max(0, r.t / r.max);
+      const e = 1 - k * k; // 一開始擴張很快
+      r.m.scale.setScalar(r.size * (0.15 + 0.85 * e));
+      r.m.material.opacity = k * 0.9;
+      if (r.face && camera) r.m.quaternion.copy(camera.quaternion);
+      if (r.t <= 0) r.m.visible = false;
+    }
+    for (const st of this.stars) {
+      if (!st.m.visible) continue;
+      st.t -= dt;
+      const k = Math.max(0, st.t / st.max);
+      // 先彈大、再縮小消失
+      const pop = k > 0.6 ? (1 - k) / 0.4 : k / 0.6;
+      st.m.scale.setScalar(st.size * (0.4 + 0.8 * pop));
+      st.m.material.opacity = Math.min(1, pop * 1.4);
+      if (camera) {
+        st.m.quaternion.copy(camera.quaternion);
+        st.m.rotateZ(st.rot);
+      }
+      if (st.t <= 0) st.m.visible = false;
+    }
     for (const f of this.flashes) {
       if (!f.m.visible) continue;
       f.t -= dt;
@@ -886,5 +1022,7 @@ export class Effects {
     this.speedLines.clear();
     for (const p of this.glow.p) p.life = 0;
     for (const p of this.smoke.p) p.life = 0;
+    for (const r of this.rings) r.m.visible = false;
+    for (const st of this.stars) st.m.visible = false;
   }
 }
