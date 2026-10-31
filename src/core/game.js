@@ -124,7 +124,9 @@ export class Game {
     this.camMode = this._load('camMode', this._load('cameraFollow2', cfg.camera.autoFollow ? 'on' : 'off') === 'on' ? 'follow' : 'free');
     if (!['follow', 'free', 'fixed', 'behind'].includes(this.camMode)) this.camMode = 'follow';
     this.cameraFollow = this.camMode === 'follow';
-    this.pc.ropeStyle = this._load('ropeStyle', cfg.hook.style);
+    // 換了預設（牽引擺盪），存檔鍵也換新，舊的「拉索」存檔不會蓋掉新預設
+    this.pc.ropeStyle = this._load('ropeStyle2', cfg.hook.style);
+    if (!['reelswing', 'pull', 'swing'].includes(this.pc.ropeStyle)) this.pc.ropeStyle = cfg.hook.style;
     this.hookFollow = this._load('hookFollow', cfg.camera.hookFollow ? 'on' : 'off') === 'on';
     this.pc.dashScale = Math.max(0.1, Math.min(2, Number(this._load('dashScale', String(cfg.dash.defaultScale))) || cfg.dash.defaultScale));
     this.aimSens = Math.max(0.5, Math.min(2, Number(this._load('aimSens', String(cfg.reticle.defaultSens))) || cfg.reticle.defaultSens));
@@ -199,8 +201,9 @@ export class Game {
     $('btn-style').addEventListener('click', () => {
       this.pc.releaseAll();
       this._releaseHeld();
-      this.pc.ropeStyle = this.pc.ropeStyle === 'pull' ? 'swing' : 'pull';
-      this._save('ropeStyle', this.pc.ropeStyle);
+      const order = ['reelswing', 'pull', 'swing'];
+      this.pc.ropeStyle = order[(order.indexOf(this.pc.ropeStyle) + 1) % order.length];
+      this._save('ropeStyle2', this.pc.ropeStyle);
       this._syncModeLabel();
     });
     $('btn-hookfollow').addEventListener('click', () => {
@@ -336,7 +339,7 @@ export class Game {
 
   _syncModeLabel() {
     document.getElementById('btn-mode').textContent = this.hookMode === 'single' ? '鋼索：單索（按住擺盪）' : '鋼索：左右雙索（進階）';
-    document.getElementById('btn-style').textContent = this.pc.ropeStyle === 'pull' ? '鋼索手感：拉索（勾住被拉過去）' : '鋼索手感：擺盪（鐘擺）';
+    document.getElementById('btn-style').textContent = { reelswing: '鋼索手感：牽引擺盪（收繩往上＋擺盪）', pull: '鋼索手感：拉索（勾住被拉過去）', swing: '鋼索手感：擺盪（鐘擺）' }[this.pc.ropeStyle];
     document.getElementById('btn-hookfollow').textContent = this.hookFollow ? '鉤住時鏡頭跟隨人物：開' : '鉤住時鏡頭跟隨人物：關';
     document.getElementById('spd-val').textContent = `速度 ${Math.round(this.pc.speedScale * 100)}%`;
     document.getElementById('dash-val').textContent = `衝刺 ${Math.round(this.pc.dashScale * 100)}%（${Math.round(this.cfg.dash.speed * this.pc.dashScale)} m/s）`;
@@ -1525,7 +1528,7 @@ export class Game {
     // 拉索：準星指哪勾哪（小範圍輔助）；擺盪：擺盪輔助瞄準
     const assist = this.touch ? H.pull.aimAssistDegTouch : H.pull.aimAssistDeg;
     const aimAt = (yawOff) => {
-      if (this.pc.ropeStyle === 'pull') {
+      if (this.pc.ropeStyle !== 'swing') {
         let d = f;
         if (yawOff) d = _v2.copy(f).applyAxisAngle(_up, (yawOff * Math.PI) / 180);
         return this.aimer.aimDirect(this.camera, d, p, H.range, assist);
@@ -1536,12 +1539,12 @@ export class Game {
       this.aims.left = this.aims.right = null;
       // 手機準心吸附（拉索模式）：準心靠近轉角／屋頂邊緣時優先吸過去
       let snapped = null;
-      if (this.touch && R.snap && this.pc.ropeStyle === 'pull') {
+      if (this.touch && R.snap && this.pc.ropeStyle !== 'swing') {
         snapped = this.aimer.snapAim(this.camera, this.reticle, p, H.range, this.city.snapAnchors, R.snapRadiusPx, innerWidth, innerHeight);
       }
       // 準心附近有巨人（且沒被建築擋住）→ 優先勾巨人
       const titanAim = this.aimer.aimTitan(this.camera, f, p, H.range, this.touch ? H.titanAssistDegTouch : H.titanAssistDeg, this.titanRoots);
-      const a = (this.aims.auto = titanAim || snapped || aimAt(0));
+      const a = (this.aims.auto = this._liftTitanAim(titanAim) || snapped || aimAt(0));
       if (a) {
         // 勾點在左邊就用左發射器，右邊用右發射器
         _right.set(-f.z, 0, f.x).normalize();
@@ -1550,9 +1553,20 @@ export class Game {
     } else {
       this.aims.auto = null;
       const tAim = (yawOff) => this.aimer.aimTitan(this.camera, _v2.copy(f).applyAxisAngle(_up, (yawOff * Math.PI) / 180), p, H.range, this.touch ? H.titanAssistDegTouch : H.titanAssistDeg, this.titanRoots);
-      this.aims.left = tAim(H.aimOffsetDeg) || aimAt(H.aimOffsetDeg);
-      this.aims.right = tAim(-H.aimOffsetDeg) || aimAt(-H.aimOffsetDeg);
+      this.aims.left = this._liftTitanAim(tAim(H.aimOffsetDeg)) || aimAt(H.aimOffsetDeg);
+      this.aims.right = this._liftTitanAim(tAim(-H.aimOffsetDeg)) || aimAt(-H.aimOffsetDeg);
     }
+  }
+
+  /** 牽引擺盪：勾巨人時，勾點移到後頸正上方（頭頂附近），擺盪弧才會經過後頸 */
+  _liftTitanAim(a) {
+    if (!a || this.pc.ropeStyle !== 'reelswing') return a;
+    const t = a.object?.userData?.titan;
+    if (!t || !t.alive) return a;
+    const p = t.napeWorld(new THREE.Vector3());
+    p.y += this.cfg.hook.reelSwing.titanLift * t.scale;
+    if (a.point.y >= p.y) return a;
+    return { ...a, point: p, object: t.nape };
   }
 
   _onPlayerEvent(e) {
@@ -1583,7 +1597,7 @@ export class Game {
       case 'fling':
         this._missionEvent('fling');
         this.audio.play('fling');
-        if (this.pc.ropeStyle === 'pull') {
+        if (this.pc.ropeStyle !== 'swing') {
           this.rig.addShake(0.12);
           this.fx.gasPuff(this.pc.pos, this.pc.vel, true);
         }
@@ -1643,6 +1657,10 @@ export class Game {
         break;
       case 'arrive':
         this.audio.play('hookRelease');
+        break;
+      case 'releaseCue': // 牽引擺盪：快到頂點、高度夠了 → 現在放索
+        this.hud.hookStatus('放！', 'ok');
+        this.audio.play('ready', { pitch: 1.5 });
         break;
       case 'wallRun':
         this.fx.dust(this.pc.pos, this.pc.vel, 4);
