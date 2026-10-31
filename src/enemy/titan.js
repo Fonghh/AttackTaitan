@@ -493,6 +493,16 @@ export class Titan {
     }
   }
 
+  /**
+   * 受擊反應：第一格就甩到最大，再帶過衝彈回（約 0.6 秒）。
+   * dir＝刀路方向（世界座標），kind：'nape' 頭往前栽、'eye' 頭往後仰、'leg' 往那一側歪、'body' 小晃
+   */
+  reactHit(dir, kind = 'body', strength = 1) {
+    const side = dir ? Math.sign(dir.x * this.forward.z - dir.z * this.forward.x) || 1 : 1;
+    const A = { nape: [0.55, 0.22, 0.28], eye: [-0.5, -0.12, 0.18], leg: [0.12, 0.1, 0.3], body: [0.14, 0.06, 0.1] }[kind] || [0.14, 0.06, 0.1];
+    this.react = { t: 0, neckX: A[0] * strength, spineX: A[1] * strength, roll: A[2] * strength * side, yaw: 0.25 * strength * side };
+  }
+
   takeHit(damage, isNape) {
     if (!this.alive) return;
     if (isNape && this.armor > 0) {
@@ -1157,6 +1167,18 @@ export class Titan {
       neckX = 0.25 + Math.sin(t * 7) * 0.12;
       neckY = Math.sin(t * 5) * 0.35;
     }
+    // 受擊反應（疊加在其他姿勢上）：e^(-7t)·cos(13t)，t=0 就是最大值
+    let reactRoll = 0;
+    if (this.react) {
+      const r = this.react;
+      r.t += dt;
+      const a = Math.exp(-7 * r.t) * Math.cos(13 * r.t);
+      neckX += r.neckX * a;
+      spineX += r.spineX * a;
+      neckY += r.yaw * a;
+      reactRoll = r.roll * a;
+      if (r.t > 0.8) this.react = null;
+    }
     // 跪下：骨盆下沉、大腿往前、小腿往後
     const kn = this.alive ? this.kneelAmount : 0;
     pelvisY -= kn * 4.2;
@@ -1167,7 +1189,8 @@ export class Titan {
 
     this.pelvis.position.y = pelvisY;
     this.spine.rotation.x = spineX;
-    this.neck.rotation.set(neckX, neckY, 0);
+    this.spine.rotation.z = reactRoll;
+    this.neck.rotation.set(neckX, neckY, reactRoll * 0.6);
     this.legL.hip.rotation.x = legA * (1 - kn) + hipK;
     this.legR.hip.rotation.x = -legA * (1 - kn) + hipK;
     this.legL.knee.rotation.x = Math.max(0, -legA) * 0.9 * (1 - kn) + kneeK;

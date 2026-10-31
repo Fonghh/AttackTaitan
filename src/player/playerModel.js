@@ -365,6 +365,11 @@ export class PlayerModel {
     this.slashSide *= -1;
   }
 
+  /** 命中：揮刀直接跳到刀刃劃過的進度 k（不換邊），頓點停在「砍到了」那一格 */
+  slashContact(k) {
+    this.slashTimer = 0.28 * (1 - k);
+  }
+
   /** 金屬（刀身、裝置）的環境反射貼圖 */
   setEnvMap(tex) {
     for (const m of this.metalMats) {
