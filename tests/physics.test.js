@@ -552,3 +552,33 @@ test('hover: hooked close to a titan, the player brakes, nearly floats and straf
   for (let i = 0; i < 60 * 3; i++) p.update(1 / 60, idle(), world());
   assert.ok(!p.hovering && p.hoverUsed >= CONFIG.hover.maxTime, 'hover ends after maxTime');
 });
+
+test('hook redirect: at high speed, a new hook turns the velocity toward it right away (no wide arc)', () => {
+  const run = (redirect) => {
+    const cfg = { ...CONFIG, hook: { ...CONFIG.hook, pull: { ...CONFIG.hook.pull, redirect } } };
+    const p = new PlayerController(cfg);
+    p.speedScale = 1;
+    p.pos.set(0, 40, 0);
+    p.vel.set(40, 0, 0); // 高速往 +x 飛
+    p.fireHook('right', p.pos.clone(), anchorAt(0, 40, -60)); // 新目標在正側方（-z）
+    for (let i = 0; i < 20 && !p.hooks.right.attached; i++) p.update(1 / 60, idle(), world());
+    p.update(1 / 60, idle(), world());
+    const toA = new Vector3(0, 40, -60).sub(p.pos).normalize();
+    return Math.acos(Math.max(-1, Math.min(1, p.vel.clone().normalize().dot(toA)))) * 180 / Math.PI;
+  };
+  const off = run(0), on = run(CONFIG.hook.pull.redirect);
+  assert.ok(on < 45 && on < off - 25, `angle to the new anchor: ${on.toFixed(0)}° with redirect vs ${off.toFixed(0)}° without`);
+});
+
+test('float after a hit: low gravity, horizontal speed trimmed, ends on a new hook or dash', () => {
+  const p = new PlayerController(CONFIG);
+  p.pos.set(0, 30, 0);
+  p.vel.set(30, -5, 0);
+  p.startFloat(CONFIG.float.kill);
+  assert.ok(Math.abs(p.vel.x - 30 * CONFIG.float.kill.keepH) < 1e-6 && p.vel.y === CONFIG.float.kill.up);
+  const y0 = p.pos.y;
+  for (let i = 0; i < 60; i++) p.update(1 / 60, idle(), world());
+  assert.ok(p.pos.y > y0, `still drifting up after 1 s (${(p.pos.y - y0).toFixed(2)} m)`);
+  p.update(1 / 60, { ...idle(), boostPressed: true, boost: true }, world());
+  assert.equal(p.floatTimer, 0, 'dash ends the float');
+});

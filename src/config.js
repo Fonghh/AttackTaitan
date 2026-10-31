@@ -33,12 +33,15 @@ export const CONFIG = {
     //           'swing' = 擺盪（鐘擺式，往上甩時放開）
     style: 'pull',
     pull: {
-      accel: 54, // 朝勾點的拉力（m/s²）
+      accel: 70, // 朝勾點的拉力（m/s²）（54 → 70：勾上後更快轉向新目標）
       maxSpeed: 50, // 拉索時朝勾點方向的最高速度
       minAccel: 18, // 速度倍率很低時的拉力下限（要拉得贏重力）
       minSpeed: 6,
-      gravityScale: 0.5, // 拉索期間的重力比例
-      sideDamp: 0.35, // 側向速度每秒收斂比例（越小越保留側向橫移）
+      gravityScale: 0.5, // 拉索期間的重力比例（再低會讓自動收繩衝過繞圈半徑；飄的感覺交給衝刺重力和斬擊後浮空）
+      sideDamp: 0.35, // 側向速度每秒收斂比例（越小越保留側向橫移）；轉向的反應改由 redirect（勾上瞬間轉向）負責
+      redirect: 0.6, // 鉤爪勾上的瞬間，速度有多少比例直接轉向勾點（0＝保留原本慣性，1＝完全轉向）
+      redirectFrom: 15, // 速度（實際 m/s）低於這個不轉向：低速擺盪、繞圈照舊
+      redirectFull: 35, // 速度高於這個時以 redirect 全力轉向
       steerAccel: 26, // 勾住時方向鍵／搖桿的側向操控力（m/s²）× 左右擺盪倍率
       defaultSteerScale: 2.0, // 左右擺盪倍率預設值（暫停選單可調 50%～300%）
       arriveDist: 6, // 衝刺時離勾點這麼近算抵達（之後放鬆、衝過頭往上飛）
@@ -60,8 +63,8 @@ export const CONFIG = {
       aimAssistDegTouch: 3,
     },
     titanAssistDeg: 5, // 準星附近這個角度內有巨人 → 優先勾巨人
-    titanAssistDegTouch: 7,
-    travelSpeed: 260, // 鉤爪飛行速度（視覺 + 命中延遲）
+    titanAssistDegTouch: 10, // （7 → 10：斬完轉向下一隻時比較好勾到）
+    travelSpeed: 340, // 鉤爪飛行速度（視覺 + 命中延遲）（260 → 340：勾上的反應更快）
     aimOffsetDeg: 10, // 雙索模式：左右鋼索相對準星的偏角
     initialSlack: 1.0, // 勾住瞬間的繩長 = 距離 × 此值（1 = 不會瞬間拉動位置）
     reelAccel: 32, // 捲收時朝勾點的推力（m/s²），只加速度、不直接搬動位置
@@ -94,7 +97,7 @@ export const CONFIG = {
     // 擺盪式衝刺：快速收繩，保留並放大擺盪（繩子變短 → 轉得更快，像溜冰收手）
     reelSpeed: 55, // 收繩速度（m/s）× 衝刺倍率
     radialAccel: 140, // 朝勾點方向的加速度上限
-    gravityScale: 0.15, // 衝刺時保留的重力（低一點才衝得到高處；推前進時再降到 0）
+    gravityScale: 0.06, // 衝刺時保留的重力（0.15 → 0.06：衝刺像貼地滑翔，幾乎不掉）
     spinUpMax: 1.05, // 每個子步驟切線速度最多放大幾倍（角動量守恆的上限）
     swingKick: 9, // 按下衝刺瞬間，沿擺盪／搖桿方向補的推力（m/s）× 衝刺倍率
     maxSpeedFactor: 1.2, // 衝刺時最高速度 = speed × 衝刺倍率 × 此值
@@ -150,6 +153,13 @@ export const CONFIG = {
     approachSpeed: 12, // 往前靠近的速度 m/s
     maxTime: 2.8, // 一次勾住最多懸停幾秒（放索重勾才重新計時）
     gasUse: 7, // 懸停每秒耗氣
+  },
+  // 斬擊後的浮空：斬中後頸＝短暫浮空、擊殺＝在蒸氣裡往上飄約 1.3 秒（低重力、水平速度先收掉一部分）
+  // 浮空中勾到下一個目標、按衝刺或翻轉就立刻結束，接著轉移
+  float: {
+    gravity: 0.1, // 浮空中的重力倍率
+    hit: { time: 0.55, up: 4, keepH: 0.55 }, // 斬中後頸
+    kill: { time: 1.3, up: 7, keepH: 0.3 }, // 擊殺
   },
   // 放索上甩與頂點滯空
   fling: {

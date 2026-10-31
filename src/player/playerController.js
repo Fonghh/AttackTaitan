@@ -50,6 +50,7 @@ export class PlayerController {
     this.hangArmed = false;
     this.hangArmTimer = 0;
     this.hangTimer = 0;
+    this.floatTimer = 0; // 斬擊後浮空剩餘秒數
     this.hovering = false; // 懸停中（勾在巨人旁邊）
     this.hoverUsed = 0; // 這次勾住已懸停的秒數
     this.thrust = new Vector3(); // 噴氣推力方向×強度（特效用：噴流往反方向噴）
@@ -187,6 +188,8 @@ export class PlayerController {
       const wasFlying = h.state === 'flying';
       if (h.updateFlight(dt, origin, cfg.hook.travelSpeed, cfg.hook.initialSlack, cfg.hook.range)) {
         this.emit('hookAttach', { side, point: h.target.clone() });
+        this._redirectToHook(h);
+        this.floatTimer = 0; // 勾到下一個目標：浮空結束，開始轉移
       } else if (wasFlying && h.state === 'idle') {
         this.emit('hookFail', { side }); // 目標在飛行途中跑掉（例如巨人移動）
       }
@@ -305,6 +308,10 @@ export class PlayerController {
 
     // 滯空計時
     if (this.hangTimer > 0) this.hangTimer -= dt;
+    if (this.floatTimer > 0) {
+      this.floatTimer -= dt;
+      if (this.grounded || intent.boostPressed) this.floatTimer = 0;
+    }
     if (this.hangArmed) {
       this.hangArmTimer -= dt;
       if (this.hangArmTimer <= 0 || this.grounded || (attached && !this.anySlack)) this.hangArmed = false;
@@ -435,6 +442,7 @@ export class PlayerController {
         // 往前推（沿繩子捲進）時重力降低，推到底＝無重力；擺盪（不推）時照常
         if (this.ropeHook) gScale *= 1 - this.ropeFwd * (1 - cfg.hook.pull.forwardGravity);
         if (this.hovering) gScale = HV.gravity;
+        else if (this.floatTimer > 0 && !attached) gScale = cfg.float.gravity;
         this.vel.y -= cfg.gravity * gScale * h;
 
         if (this.grounded && !(attached && this.reeling > 0)) {
@@ -738,6 +746,37 @@ export class PlayerController {
       _v1.copy(this.vel).addScaledVector(_tmp, -tAlong);
       this.vel.addScaledVector(_v1, -Math.min(1, 4 * this.ropeFwd * h));
     }
+  }
+
+  /**
+   * 鉤爪勾上的瞬間（拉索模式）：速度直接轉向勾點一部分，不用等拉力慢慢把弧線拉直。
+   * 這樣轉向靠的是「勾哪裡」，不是搖桿的反應時間。
+   */
+  _redirectToHook(hk) {
+    const PL = this.cfg.hook.pull;
+    if (this.ropeStyle !== 'pull' || this.busy || !PL.redirect) return;
+    hk.anchor(_v1).sub(this.pos);
+    const d = _v1.length();
+    if (d < 1e-3) return;
+    _v1.multiplyScalar(1 / d);
+    // 只在高速時轉向（低速時保留擺盪、繞圈的手感）：15 m/s 以下不轉、35 m/s 以上全力轉
+    const s = this.vel.length();
+    const k = PL.redirect * Math.max(0, Math.min(1, (s - PL.redirectFrom) / (PL.redirectFull - PL.redirectFrom)));
+    if (k <= 0) return;
+    _hv.copy(_v1).multiplyScalar(s * 0.9);
+    this.vel.lerp(_hv, k);
+  }
+
+  /**
+   * 斬擊後浮空：水平速度先收掉一部分、往上飄，低重力維持 time 秒。
+   * @param {{time:number, up:number, keepH:number}} o
+   */
+  startFloat(o) {
+    this.floatTimer = o.time;
+    this.vel.x *= o.keepH;
+    this.vel.z *= o.keepH;
+    this.vel.y = Math.max(this.vel.y * 0.3, o.up);
+    this.hangTimer = 0;
   }
 
   /** 這條鋼索的繞圈半徑：建築＝設定值；巨人＝設定值 × 倍率 × 體型 */

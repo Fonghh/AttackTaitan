@@ -1059,7 +1059,7 @@ export class Game {
     // 不顯示傷害數字，只用一個字強調
     const sp = this.hud.project(this.napePos, this.camera, {});
     this.hud.popup(sp.x, sp.y - 20, label || (spin ? '迴旋斬！' : perfect ? '完美斬擊！' : '斬！'), perfect ? 'perfect' : 'crit');
-    this.pc.vel.y = Math.max(this.pc.vel.y, 0) + 5; // 斬過後微微上彈
+    if (!spin) this.pc.startFloat(this.cfg.float.hit); // 斬過後短暫浮空（擊殺時在 _onKill 換成更長的浮空）
     if (!titan.alive) this._onKill(titan);
   }
 
@@ -1081,6 +1081,7 @@ export class Game {
     this.hitStop = 0.2;
     this.slowMo = this.slowMoMax = 1.2;
     this.rig.startKillCam(titan, this.napePos, this.pc);
+    if (!this.pc.levi) this.pc.startFloat(this.cfg.float.kill); // 在蒸氣裡往上飄
     this.fx.shockRing(this.napePos, 16 * titan.scale, '#ffd27a', 0.6);
     this.fx.impactStar(this.napePos, 10, '#fff2c0', 0.32);
     const left = this.titans.filter((t) => t.alive).length;
@@ -1349,7 +1350,11 @@ export class Game {
     const fixedCam = this.camMode === 'fixed' || this.camMode === 'behind'; // 這兩種都不做其他自動轉向
     const behindCam = this.camMode === 'behind';
     // 目標鎖定（鎖定鈕）優先：不管哪種鏡頭模式、有沒有勾住都對準它；否則照「勾住巨人時鎖定」的設定
-    if (this.targetLock && !this.targetLock.alive) this._setTargetLock(null);
+    // 鎖定的巨人死了：自動換鎖最近的下一隻（轉移到下一個目標）
+    if (this.targetLock && !this.targetLock.alive) {
+      this.targetLock = null;
+      this._cycleTargetLock();
+    }
     const explicitLock = this.targetLock;
     const lockTitan = explicitLock || (this.lockCam && !fixedCam ? this._hookedTitan() : null);
     const manualTurning = (this.touch && (t.turnX || t.turnY)) || (!this.touch && intent.manualLook && Math.hypot(intent.lookDX, intent.lookDY) > 0.004);
