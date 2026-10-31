@@ -6,6 +6,9 @@ import { applyRopeConstraint, collideSphereAABB, resolveWorldCollisions } from '
 import { PlayerController } from '../src/player/playerController.js';
 import { evaluateStrike, napeDamage, canLunge } from '../src/combat/strike.js';
 
+// 這個檔案測拉索與擺盪（舊預設是拉索）；預設的「牽引擺盪」在 reelswing.test.js
+CONFIG.hook.style = 'pull';
+
 const idle = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false });
 const world = (colliders = []) => ({ colliders, wallRadius: 270, camYaw: 0, camForward: new Vector3(0, 0, -1) });
 

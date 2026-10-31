@@ -138,7 +138,7 @@ export class PlayerController {
   _onFullRelease() {
     const f = this.cfg.fling;
     if (!this.grounded && this.vel.y > f.minUpVel) {
-      if (this.ropeStyle === 'pull') {
+      if (this.ropeStyle !== 'swing') {
         // 拉索放開：往上衝（像衝過牆頂那樣）
         const P = this.cfg.hook.pull;
         this.vel.y = this.vel.y * (1 + P.launchBonus) + P.launchUp * Math.max(0.3, this.speedScale);
@@ -230,14 +230,14 @@ export class PlayerController {
     }
     // 拉索模式：勾住就一直被拉；擺盪模式：只有 Space 捲收
     // 拉索靠近勾點後停止拉動（鋼索不斷，改成繞勾點擺盪），拉遠了再恢復
-    if (attached && this.ropeStyle === 'pull') {
+    if (attached && this.ropeStyle !== 'swing') {
       const PL = cfg.hook.pull;
       const A = PL.arriveDist;
       for (const side of ['left', 'right']) {
         const hk = this.hooks[side];
         if (!hk.attached) continue;
         const d = this.pos.distanceTo(hk.anchor(_anchor));
-        const R = this.orbitRadiusFor(hk);
+        const R = this._reelOrbitR(hk, _anchor);
         // 放鬆的鋼索被「往前推」拉緊
         if (hk.slack && intent.move.y > 0.5 && !dashing && !this.flip) {
           hk.slack = false;
@@ -268,12 +268,13 @@ export class PlayerController {
         hk.orbitR = R;
         if (!hk.slack && !dashing && !this.busy && hk.length > R && this.autoReel > 0) {
           if (intent.move.y >= PL.holdDot) hk.reelRate = this.autoReel; // 搖桿往後拉＝暫停收繩
+          if (hk.reelRate > 0 && this.ropeStyle === 'reelswing') hk.reelRate = this._reelSwingRate(hk, _anchor, d);
         }
       }
     }
     // 搖桿往後拉＝暫停收繩、停止拉動，維持目前距離
-    this.reelHold = attached && this.ropeStyle === 'pull' && !dashing && intent.move.y < cfg.hook.pull.holdDot;
-    const pulling = attached && this.ropeStyle === 'pull' && !this.busy && !this.reelHold && (this.hooks.left.pullOn || this.hooks.right.pullOn);
+    this.reelHold = attached && this.ropeStyle !== 'swing' && !dashing && intent.move.y < cfg.hook.pull.holdDot;
+    const pulling = attached && this.ropeStyle !== 'swing' && !this.busy && !this.reelHold && (this.hooks.left.pullOn || this.hooks.right.pullOn);
     this.pulling = pulling;
     this.reeling = pulling ? 1 : attached ? Math.max(intent.reel, dashing ? 1 : 0) : 0;
 
@@ -381,7 +382,7 @@ export class PlayerController {
     // 勾住（拉索）時的搖桿：前＝沿繩子朝勾點、左右＝垂直於繩子繞著勾點橫移（以鏡頭右方為準）
     this.ropeFwd = 0;
     this.ropeHook = null;
-    if (attached && this.ropeStyle === 'pull' && !this.busy) {
+    if (attached && this.ropeStyle !== 'swing' && !this.busy) {
       for (const side of ['left', 'right']) {
         const hk = this.hooks[side];
         if (hk.attached && (!this.ropeHook || (this.ropeHook.slack && !hk.slack))) this.ropeHook = hk;
@@ -398,7 +399,9 @@ export class PlayerController {
     let hovering = false;
     if (HV.enabled && this.ropeHook && !this.ropeHook.slack && !dashing && !this.busy && this.gas > 0 && this.ropeHook.object?.userData?.titan && this.hoverUsed < HV.maxTime) {
       const d = this.pos.distanceTo(this.ropeHook.anchor(_anchor));
-      if (d < this.orbitRadiusFor(this.ropeHook) + HV.enterExtra) hovering = true;
+      // 牽引擺盪：還在後頸下面就不懸停，繼續收繩往上盪
+      const low = this.ropeStyle === 'reelswing' && this.pos.y < this._reelTargetY(this.ropeHook, _anchor) - this.cfg.hook.reelSwing.hoverBelow;
+      if (!low && d < this.orbitRadiusFor(this.ropeHook) + HV.enterExtra) hovering = true;
     }
     if (hovering) {
       if (!this.hovering) this.emit('hoverStart', {});
@@ -431,7 +434,8 @@ export class PlayerController {
 
     for (let i = 0; i < n; i++) {
       if (!this.busy) {
-        let gScale = pulling ? (dashing ? cfg.dash.gravityScale : cfg.hook.pull.gravityScale) : this.hangTimer > 0 ? cfg.fling.hangGravityScale : 1;
+        const pullG = this.ropeStyle === 'reelswing' ? cfg.hook.reelSwing.gravityScale : cfg.hook.pull.gravityScale;
+        let gScale = pulling ? (dashing ? cfg.dash.gravityScale : pullG) : this.hangTimer > 0 ? cfg.fling.hangGravityScale : 1;
         // 往前推（沿繩子捲進）時重力降低，推到底＝無重力；擺盪（不推）時照常
         if (this.ropeHook) gScale *= 1 - this.ropeFwd * (1 - cfg.hook.pull.forwardGravity);
         if (this.hovering) gScale = HV.gravity;
@@ -441,7 +445,7 @@ export class PlayerController {
           this._groundMove(h, intent);
         } else {
           // 空中轉向；勾住時側向操控更強（朝方向鍵的方向擺盪／橫移）
-          const steer = attached ? (this.ropeStyle === 'pull' ? cfg.hook.pull.steerAccel : P.airAccel) * this.steerScale : P.airAccel;
+          const steer = attached ? (this.ropeStyle !== 'swing' ? cfg.hook.pull.steerAccel : P.airAccel) * this.steerScale : P.airAccel;
           if (this.ropeHook) {
             // 左右：繞著勾點橫移；前：沿繩子朝勾點加速（接近時減速，衝刺時不限）
             if (!this.hovering) this.vel.addScaledVector(_steer, steer * h); // 懸停時平移速度由下面直接控制
@@ -487,11 +491,20 @@ export class PlayerController {
               const dist = this.pos.distanceTo(_anchor);
               hk.length = Math.max(cfg.hook.minLength, hk.floorR || 0, Math.min(hk.length, dist));
             }
+            let spin = 1;
             if (it === 0 && hk.reelRate > 0 && hk.length > hk.orbitR) {
               // 自動收繩（拉索模式）：每個子步驟收一點，收到繞圈半徑為止
-              hk.length = Math.max(hk.orbitR, Math.min(hk.length, this.pos.distanceTo(_anchor)) - hk.reelRate * h);
+              const before = Math.min(hk.length, this.pos.distanceTo(_anchor));
+              hk.length = Math.max(hk.orbitR, before - hk.reelRate * h);
+              if (this.ropeStyle === 'reelswing' && hk.length > 1e-3) spin = Math.min(cfg.hook.reelSwing.spinUpMax, before / hk.length);
             }
             const r = applyRopeConstraint(this.pos, this.vel, _anchor, hk.length, cfg.hook.maxCorrection);
+            if (spin > 1 && r.taut) {
+              // 牽引擺盪：收繩時角動量守恆 → 切線速度 × 舊長／新長（收繩做功，越盪越快、越盪越高）
+              _v1.subVectors(this.pos, _anchor).normalize();
+              _tmp.copy(this.vel).addScaledVector(_v1, -this.vel.dot(_v1));
+              this.vel.addScaledVector(_tmp, spin - 1);
+            }
             hk.taut = r.taut;
             hk.length = r.length;
           }
@@ -581,6 +594,47 @@ export class PlayerController {
     }
     this._prevVel.copy(this.vel);
     if (hitWall) this.emit('bump', {});
+
+    // 牽引擺盪：往上盪、快到頂點、高度接近目標 → 提示放索
+    if (this.ropeStyle === 'reelswing' && this.ropeHook && !this.ropeHook.slack && !this.hovering && !dashing && !this.grounded) {
+      const RS = cfg.hook.reelSwing;
+      if (this._prevVy > RS.cueVy && this.vel.y <= RS.cueVy && this.vel.y > 0) {
+        const ty = this._reelTargetY(this.ropeHook, this.ropeHook.anchor(_anchor));
+        if (Math.abs(this.pos.y - ty) < RS.cueRange) this.emit('releaseCue', {});
+      }
+    }
+    this._prevVy = this.vel.y;
+  }
+
+  /**
+   * 收繩停在多長：一般＝繞圈半徑；牽引擺盪勾巨人、人還在後頸下面時，收到「擺盪最低點到得了後頸」為止
+   * （勾點高度 − 繩長 ≥ 後頸高度 − 1），不然繞圈半徑比勾點到後頸的高度差大，會一直吊在後頸下面
+   */
+  _reelOrbitR(hk, anchor) {
+    const R = this.orbitRadiusFor(hk);
+    if (this.ropeStyle !== 'reelswing' || !hk.object?.userData?.titan) return R;
+    const ty = this._reelTargetY(hk, anchor);
+    if (this.pos.y >= ty - this.cfg.hook.reelSwing.hoverBelow) return R;
+    return Math.min(R, Math.max(this.cfg.hook.minLength, anchor.y - ty + 1));
+  }
+
+  /** 牽引擺盪的目標高度：巨人＝後頸；建築＝勾點下方一點 */
+  _reelTargetY(hk, anchor) {
+    const t = hk.object?.userData?.titan;
+    return t?.napeWorld ? t.napeWorld(_v1).y : anchor.y - this.cfg.hook.reelSwing.buildingTargetDrop;
+  }
+
+  /**
+   * 牽引擺盪的收繩速度：擺到最低點時收最快（像盪鞦韆在最低點蹲站），接近頂點幾乎不收，弧形保持完整；
+   * 這一盪能到的最高點（高度 + v²/2g）比目標低時加收，保證爬得上去
+   */
+  _reelSwingRate(hk, anchor, d) {
+    const RS = this.cfg.hook.reelSwing;
+    const cosT = d > 1e-3 ? (anchor.y - this.pos.y) / d : 0;
+    let rate = this.autoReel * RS.reelScale * Math.max(RS.minWeight, cosT);
+    const apexY = this.pos.y + this.vel.lengthSq() / (2 * this.cfg.gravity);
+    if (apexY < this._reelTargetY(hk, anchor) + RS.gapMargin) rate *= RS.gapBoost;
+    return rate;
   }
 
   /** 地面衝刺開始：壓低身體沿搖桿（沒推就沿視角）方向起步滑鏟 */
@@ -800,6 +854,15 @@ export class PlayerController {
           continue;
         }
         hk.prevDist = 0;
+        if (this.ropeStyle === 'reelswing') {
+          // 牽引擺盪：只在勾住瞬間扯一下；之後不朝勾點推、不收側向速度（高度交給收繩）
+          const RS = H.reelSwing;
+          if (hk.attachTime < RS.yankTime) {
+            const room = Math.max(H.pull.minSpeed, RS.yankSpeed * this.speedScale) - along;
+            if (room > 0) this.vel.addScaledVector(_anchor, Math.min(RS.yankAccel * h, room));
+          }
+          continue;
+        }
         const room = Math.max(H.pull.minSpeed, H.pull.maxSpeed * this.speedScale) - along;
         const acc = Math.max(H.pull.minAccel, H.pull.accel * this.speedScale);
         const damp = H.pull.sideDamp;
