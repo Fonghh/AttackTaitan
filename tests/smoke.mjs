@@ -757,6 +757,21 @@ try {
     g.pc.releaseAll();
     g.touch = wasTouch;
     cam.behind.touchDiff = +touchDiff.toFixed(3);
+    // 目標鎖定：點一下鎖定、再點換下一隻、長按解除；鎖定時鏡頭對準、拉遠，後頸有標記
+    g.camMode = 'follow';
+    g._handleEvent('lock');
+    g._handleEvent('lockUp');
+    const first = g.targetLock && g.targetLock.name;
+    for (let i = 0; i < 60; i++) g.step(1 / 60, base());
+    g.renderer.render(g.scene, g.camera);
+    cam.target = { first, locked: g.rig.locked, wide: +(g.rig.lockWide || 0).toFixed(2), mark: !document.getElementById('lockmark').hidden };
+    g._handleEvent('lock');
+    g._handleEvent('lockUp');
+    cam.target.second = g.targetLock && g.targetLock.name;
+    g._handleEvent('lock');
+    g.lockPress = performance.now() - 1000; // 模擬長按
+    g._handleEvent('lockUp');
+    cam.target.cleared = !g.targetLock;
     g.camMode = 'follow';
     g.cameraFollow = true;
     const texts = [g.hud.el.mission.textContent];
@@ -769,6 +784,7 @@ try {
   check('[camera] hooked on a titan: camera locks on and banks into the orbit; hits leave wounds', training.cam.locked && Math.abs(training.cam.roll) > 0.05 && training.cam.wounds > 0, JSON.stringify(training.cam));
   check('[camera] fixed view: orbiting and flying never turn or bank the camera', training.cam.fixed.dyaw < 1e-3 && training.cam.fixed.dpitch < 1e-3 && Math.abs(training.cam.fixed.roll) < 0.01 && !training.cam.fixed.locked, JSON.stringify(training.cam.fixed));
   check('[camera] behind view: camera stays behind the character while orbiting and flying', training.cam.behind.turned > 0.5 && training.cam.behind.maxDiff < 0.35 && training.cam.behind.flyDiff < 0.2 && training.cam.behind.touchDiff < 0.35, JSON.stringify(training.cam.behind));
+  check('[camera] target lock: tap locks and cycles, long press clears; camera locks and pulls back; nape marker shown', !!training.cam.target.first && training.cam.target.locked && training.cam.target.wide > 0.8 && training.cam.target.mark && training.cam.target.second && training.cam.target.second !== training.cam.target.first && training.cam.target.cleared, JSON.stringify(training.cam.target));
   check('[training] finishing all 6 steps completes the level, shows stars and unlocks the next level', training.state === 'won' && /★/.test(training.stars || '') && training.next, JSON.stringify(training));
   const rings = await levelRun('rings', () => {
     const g = window.__game;

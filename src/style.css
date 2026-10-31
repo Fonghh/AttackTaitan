@@ -1053,3 +1053,45 @@ body.touch.tutorial #mission {
 body.tutorial #toast {
   top: 38%;
 }
+
+/* 目標鎖定：鎖定鈕（斬擊上方、鋼索左邊）與後頸上的鎖定標記 */
+.t-lock {
+  right: calc(176px + env(safe-area-inset-right, 0px));
+  bottom: calc(126px + env(safe-area-inset-bottom, 0px));
+  width: 58px;
+  height: 58px;
+  font-size: 13px;
+  border-color: rgba(255, 110, 90, 0.75);
+}
+.t-lock.on {
+  background: rgba(150, 30, 20, 0.55);
+  box-shadow: 0 0 10px rgba(255, 110, 90, 0.8);
+}
+#lockmark {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+  pointer-events: none;
+  border: 2px solid rgba(255, 90, 70, 0.9);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(255, 80, 60, 0.7);
+  animation: lockspin 2.4s linear infinite;
+}
+#lockmark i {
+  position: absolute;
+  width: 10px;
+  height: 3px;
+  background: #ff5a46;
+  left: 50%;
+  top: 50%;
+}
+#lockmark i:nth-child(1) { transform: translate(-50%, -50%) translateX(-29px); }
+#lockmark i:nth-child(2) { transform: translate(-50%, -50%) translateX(29px); }
+#lockmark i:nth-child(3) { transform: translate(-50%, -50%) rotate(90deg) translateX(-29px); }
+#lockmark i:nth-child(4) { transform: translate(-50%, -50%) rotate(90deg) translateX(29px); }
+@keyframes lockspin {
+  to { rotate: 360deg; }
+}

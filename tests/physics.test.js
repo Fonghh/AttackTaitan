@@ -522,3 +522,33 @@ test('flip along the rope: tuck, burst to the hook point, auto-detach and keep f
   assert.ok(!p.hooks.right.active, 'no rope left');
   assert.ok(maxY > 45 + 10, `flew on past the hook point (peak ${maxY.toFixed(1)}m, hook at 45m)`);
 });
+
+test('hover: hooked close to a titan, the player brakes, nearly floats and strafes with the stick', () => {
+  const p = new PlayerController(CONFIG);
+  p.speedScale = CONFIG.player.defaultSpeedScale;
+  const titanHook = anchorAt(0, 40, 0);
+  titanHook.object.userData.titan = { scale: 1 };
+  const R = p.orbitRadius * CONFIG.hook.pull.orbitTitanFactor;
+  p.pos.set(R, 40, 0);
+  p.vel.set(0, 0, 25); // 帶著速度靠近
+  p.fireHook('right', p.pos.clone(), titanHook);
+  let started = false;
+  for (let i = 0; i < 20; i++) {
+    p.update(1 / 60, idle(), world());
+    if (p.events.some((e) => e.type === 'hoverStart')) started = true;
+    p.events.length = 0;
+  }
+  assert.ok(p.hooks.right.attached && p.hovering && started, 'hover starts next to the titan');
+  const y0 = p.pos.y;
+  for (let i = 0; i < 60; i++) p.update(1 / 60, idle(), world());
+  assert.ok(p.speed < 4, `braked to ${p.speed.toFixed(1)} m/s`);
+  assert.ok(y0 - p.pos.y < 3, `barely sinks (${(y0 - p.pos.y).toFixed(2)} m in 1 s)`);
+  assert.ok(p.thrust.y > 0.3, 'jet points down while hovering');
+  // 左搖桿往右：繞著勾點平移
+  for (let i = 0; i < 30; i++) p.update(1 / 60, { ...idle(), move: { x: 1, y: 0 } }, world());
+  assert.ok(p.speed > 6, `strafes (${p.speed.toFixed(1)} m/s)`);
+  assert.ok(Math.abs(p.thrust.x) + Math.abs(p.thrust.z) > 0.4, 'side jet while strafing');
+  // 懸停有時間上限
+  for (let i = 0; i < 60 * 3; i++) p.update(1 / 60, idle(), world());
+  assert.ok(!p.hovering && p.hoverUsed >= CONFIG.hover.maxTime, 'hover ends after maxTime');
+});

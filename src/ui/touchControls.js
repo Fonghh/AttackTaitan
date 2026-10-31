@@ -31,6 +31,7 @@ export class TouchControls {
       <button class="tbtn t-hookL" data-hold="left">左鉤</button>
       <button class="tbtn t-hookR" data-hold="right">右鉤</button>
       <button class="tbtn t-strike" data-act="strike">斬擊</button>
+      <button class="tbtn t-lock" data-act="lock" aria-label="鎖定目標">鎖定</button>
       <div class="t-hint">左下＝移動。按住「鋼索」拖曳移動準心、放開發射；勾住後點一下放索</div>`;
     this.base = root.querySelector('.joy-base');
     this.knob = root.querySelector('.joy-knob');
@@ -42,6 +43,7 @@ export class TouchControls {
       left: root.querySelector('.t-hookL'),
       right: root.querySelector('.t-hookR'),
       strike: root.querySelector('.t-strike'),
+      lock: root.querySelector('.t-lock'),
     };
     this.applyMode();
 
@@ -164,6 +166,7 @@ export class TouchControls {
       b.classList.remove('pressed');
       if (act === 'boost') this.input.touch.boost = false;
       if (act === 'strike') this.input.push('strikeUp'); // 長按斬擊（兵長斬）的放開
+      if (act === 'lock') this.input.push('lockUp'); // 鎖定：短按切換目標、長按解除
       const d = b._drag;
       b._drag = null;
       if (!hold || !d) return;

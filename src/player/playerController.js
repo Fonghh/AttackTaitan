@@ -18,6 +18,7 @@ const _fwd = new Vector3();
 const _ropeDir = new Vector3();
 const _v1 = new Vector3();
 const _steer = new Vector3();
+const _hv = new Vector3();
 
 export class PlayerController {
   constructor(cfg) {
@@ -49,6 +50,9 @@ export class PlayerController {
     this.hangArmed = false;
     this.hangArmTimer = 0;
     this.hangTimer = 0;
+    this.hovering = false; // 懸停中（勾在巨人旁邊）
+    this.hoverUsed = 0; // 這次勾住已懸停的秒數
+    this.thrust = new Vector3(); // 噴氣推力方向×強度（特效用：噴流往反方向噴）
     this.invuln = 0;
     this.lunge = null; // { timer, target: () => Vector3 }
     this.levi = null; // 兵長斬 { phase: 'windup'|'dash', t, side, done }
@@ -389,6 +393,36 @@ export class PlayerController {
       else _steer.set(0, 0, 0);
     }
 
+    // 懸停：勾在巨人身上、已經靠近到繞圈距離 → 低重力、快速煞停，左搖桿小範圍平移
+    const HV = cfg.hover;
+    let hovering = false;
+    if (HV.enabled && this.ropeHook && !this.ropeHook.slack && !dashing && !this.busy && this.gas > 0 && this.ropeHook.object?.userData?.titan && this.hoverUsed < HV.maxTime) {
+      const d = this.pos.distanceTo(this.ropeHook.anchor(_anchor));
+      if (d < this.orbitRadiusFor(this.ropeHook) + HV.enterExtra) hovering = true;
+    }
+    if (hovering) {
+      if (!this.hovering) this.emit('hoverStart', {});
+      this.ropeHook.pullOn = false; // 懸停時不再被拉、不收繩（停在巨人旁邊）
+      this.pulling = false;
+      this.reeling = 0;
+      this.hoverUsed += dt;
+      this.gas = Math.max(0, this.gas - HV.gasUse * dt);
+    } else if (!attached) this.hoverUsed = 0;
+    this.hovering = hovering;
+
+    // 推力方向（給噴流特效）：氣體往哪推，噴流就往反方向噴
+    this.thrust.set(0, 0, 0);
+    if (dashing && this.ropeHook) this.thrust.copy(_ropeDir).multiplyScalar(1.4);
+    else if (this.groundDashing && _wish.lengthSq() > 0.01) this.thrust.copy(_wish).setY(0).normalize().multiplyScalar(1.1);
+    if (this.boosting) this.thrust.addScaledVector(world.camForward, 1.2);
+    if (this.ropeHook && !dashing) {
+      this.thrust.addScaledVector(_steer, 0.9); // 左右平移／繞圈：側噴
+      if (this.ropeFwd > 0) this.thrust.addScaledVector(_ropeDir, this.ropeFwd * 0.8);
+    }
+    if (hovering) this.thrust.y += 0.55; // 懸停：往下噴撐住
+    if (airThrust) this.thrust.y += 0.9;
+    if (this.flip && this.flip.phase === 'burst' && this.vel.lengthSq() > 1) this.thrust.copy(this.vel).normalize().multiplyScalar(1.4);
+
     const wasGrounded = this.grounded;
     const n = substepCount(this.speed + 10, dt);
     const h = dt / n;
@@ -400,6 +434,7 @@ export class PlayerController {
         let gScale = pulling ? (dashing ? cfg.dash.gravityScale : cfg.hook.pull.gravityScale) : this.hangTimer > 0 ? cfg.fling.hangGravityScale : 1;
         // 往前推（沿繩子捲進）時重力降低，推到底＝無重力；擺盪（不推）時照常
         if (this.ropeHook) gScale *= 1 - this.ropeFwd * (1 - cfg.hook.pull.forwardGravity);
+        if (this.hovering) gScale = HV.gravity;
         this.vel.y -= cfg.gravity * gScale * h;
 
         if (this.grounded && !(attached && this.reeling > 0)) {
@@ -409,8 +444,14 @@ export class PlayerController {
           const steer = attached ? (this.ropeStyle === 'pull' ? cfg.hook.pull.steerAccel : P.airAccel) * this.steerScale : P.airAccel;
           if (this.ropeHook) {
             // 左右：繞著勾點橫移；前：沿繩子朝勾點加速（接近時減速，衝刺時不限）
-            this.vel.addScaledVector(_steer, steer * h);
+            if (!this.hovering) this.vel.addScaledVector(_steer, steer * h); // 懸停時平移速度由下面直接控制
             if (this.ropeFwd > 0) this._ropeForward(h, dashing);
+            if (this.hovering) {
+              // 懸停：速度快速收斂到「搖桿想要的平移速度」（沒推＝停住）
+              _hv.copy(_steer).multiplyScalar(HV.strafeSpeed);
+              if (this.ropeFwd > 0) _hv.addScaledVector(_ropeDir, this.ropeFwd * HV.approachSpeed);
+              this.vel.lerp(_hv, 1 - Math.exp(-HV.brake * h));
+            }
           } else this.vel.addScaledVector(_wish, steer * h);
           if (airThrust) this.vel.y += P.airThrust * h;
         }

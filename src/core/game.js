@@ -20,6 +20,7 @@ import { Effects } from '../fx/effects.js';
 import { Audio } from '../audio/audio.js';
 
 const _v = new THREE.Vector3();
+const _nozzle = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
@@ -417,6 +418,7 @@ export class Game {
     this.grab = null;
     for (const t of this.titans) t.reset();
     this.titan = this.titans[0] || NO_TITAN;
+    this._setTargetLock(null);
     this.mission.reset();
     this.rig.reset(this.spawnYaw);
     this.fx.reset();
@@ -625,6 +627,17 @@ export class Game {
         else if (this._leviSide()) this.strikeHold = { t: 0 }; // 勾住時：放開前看是短按還是長按（兵長斬）
         else this._strike();
         break;
+      case 'lock':
+        this.lockPress = performance.now();
+        break;
+      case 'lockUp': {
+        if (this.lockPress == null) break;
+        const held = (performance.now() - this.lockPress) / 1000;
+        this.lockPress = null;
+        if (held > this.cfg.camera.lock.holdClear) this._setTargetLock(null);
+        else this._cycleTargetLock();
+        break;
+      }
       case 'strikeUp':
         if (this.strikeHold) {
           this.strikeHold = null;
@@ -649,7 +662,43 @@ export class Game {
   }
 
   /** 選擇目標巨人：勾住的優先，否則選後頸離玩家最近的（有一點黏性，避免一直切換） */
+  /** 目標鎖定：沒鎖＝鎖準心方向最近的巨人；已鎖＝換下一隻（依距離＋偏離準心的程度排序） */
+  _cycleTargetLock() {
+    const L = this.cfg.camera.lock;
+    const f = this.rig.forward;
+    const list = this.titans
+      .filter((t) => t.alive)
+      .map((t) => {
+        const d = _v.subVectors(t.napeWorld(_v2), this.pc.pos);
+        const dist = d.length();
+        const off = 1 - d.dot(f) / Math.max(dist, 1e-3); // 0＝正前方、2＝正後方
+        return { t, dist, score: dist * (1 + off * 1.5) };
+      })
+      .filter((c) => c.dist < L.range)
+      .sort((a, b) => a.score - b.score);
+    if (!list.length) {
+      this._setTargetLock(null);
+      return;
+    }
+    const i = list.findIndex((c) => c.t === this.targetLock);
+    this._setTargetLock(list[(i + 1) % list.length].t);
+  }
+
+  _setTargetLock(t) {
+    if ((t || null) === (this.targetLock || null)) return;
+    this.targetLock = t;
+    document.querySelector('.t-lock')?.classList.toggle('on', !!t);
+    if (t) {
+      this.audio.play('hookFire');
+      this.hud.toast(`鎖定：${t.name}`, 'good', 0.9);
+    } else this.audio.play('hookRelease');
+  }
+
   _pickTarget() {
+    if (this.targetLock && this.targetLock.alive) {
+      this.titan = this.targetLock;
+      return;
+    }
     const hooked = this._hookedTitan();
     if (hooked && hooked.alive) {
       this.titan = hooked;
@@ -1247,25 +1296,35 @@ export class Game {
     // 鎖定鏡頭：勾在巨人身上 → 鏡頭對準牠；手動轉鏡頭持續一段時間＝解除（直到下次勾住）
     const fixedCam = this.camMode === 'fixed' || this.camMode === 'behind'; // 這兩種都不做其他自動轉向
     const behindCam = this.camMode === 'behind';
-    const lockTitan = this.lockCam && !fixedCam ? this._hookedTitan() : null;
+    // 目標鎖定（鎖定鈕）優先：不管哪種鏡頭模式、有沒有勾住都對準它；否則照「勾住巨人時鎖定」的設定
+    if (this.targetLock && !this.targetLock.alive) this._setTargetLock(null);
+    const explicitLock = this.targetLock;
+    const lockTitan = explicitLock || (this.lockCam && !fixedCam ? this._hookedTitan() : null);
     const manualTurning = (this.touch && (t.turnX || t.turnY)) || (!this.touch && intent.manualLook && Math.hypot(intent.lookDX, intent.lookDY) > 0.004);
     this.manualTurnTime = manualTurning ? (this.manualTurnTime || 0) + rdt : 0;
     if (!lockTitan) this.lockBroken = false;
-    else if (this.manualTurnTime > C.lock.breakAfter) this.lockBroken = true;
+    else if (!explicitLock && this.manualTurnTime > C.lock.breakAfter) this.lockBroken = true;
     let lockTarget = null;
-    if (lockTitan && lockTitan.alive && !this.lockBroken && !pc.levi) {
+    if (lockTitan && lockTitan.alive && (explicitLock || !this.lockBroken) && !pc.levi) {
       lockTarget = lockTitan.napeWorld(_aimLock);
       lockTarget.y -= C.lock.aimDrop * lockTitan.scale;
     }
     document.body.classList.toggle('cam-locked', !!lockTarget);
+    // 懸停時身體面向勾點（巨人），邊平移邊盯著後頸；「緊貼背後」鏡頭直接對準這個方向
+    let hoverYaw = null;
+    if (pc.hovering && pc.ropeHook) {
+      pc.ropeHook.anchor(_v);
+      hoverYaw = Math.atan2(-(_v.x - pc.pos.x), -(_v.z - pc.pos.z));
+    }
     this.rig.update(dt, pc, {
       touch: this.touch,
       joyX: intent.move.x,
       joyTurn: lockTarget || fixedCam ? 0 : (this.cfg.camera.joyTurn.levels[this.joyTurnLevel] ?? 1), // 鎖定時左搖桿＝繞圈，不轉鏡頭
       autoFollow: this.cameraFollow,
       followYaw: hookFollow && !fixedCam ? this.model.yaw : null,
-      fixed: fixedCam && !behindCam,
-      behindYaw: behindCam ? this.model.yaw : null,
+      fixed: fixedCam && !behindCam && !lockTarget,
+      behindYaw: behindCam && !lockTarget ? (hoverYaw ?? this.model.yaw) : null,
+      lockWide: !!(explicitLock && lockTarget),
       lowAngle: this.lowAngle,
       lockTarget,
       rollLevel: this.cfg.camera.roll.levels[this.camRollLevel] ?? 0,
@@ -1273,8 +1332,20 @@ export class Game {
       close: !!(pc.lunge || pc.levi || pc.dashGlow > 0.35), // 衝刺時鏡頭拉近（放開後跟著速度感慢慢退）
       realDt: this.realDt,
     });
+    // 目標鎖定標記：畫在被鎖定巨人的後頸上（在畫面外／背後就藏起來）
+    const lm = (this._lockMark ||= document.getElementById('lockmark'));
+    if (explicitLock) {
+      const sp = this.hud.project(explicitLock.napeWorld(_v), this.camera, {});
+      const show = !sp.behind && sp.x > -30 && sp.x < innerWidth + 30 && sp.y > -30 && sp.y < innerHeight + 30;
+      lm.hidden = !show;
+      if (show) {
+        lm.style.left = `${sp.x.toFixed(1)}px`;
+        lm.style.top = `${sp.y.toFixed(1)}px`;
+      }
+    } else if (!lm.hidden) lm.hidden = true;
     // 鎖定時角色身體朝向目標（背對鏡頭繞圈，出刀一直朝著巨人）
-    this.model.update(dt, pc, this.rig.yaw, lockTarget ? this.rig.yaw : null);
+    const faceYaw = lockTarget ? this.rig.yaw : hoverYaw;
+    this.model.update(dt, pc, this.rig.yaw, faceYaw);
     this.city.update(pc.pos);
 
     // 鋼索瞄準預測（供下一次發射與 HUD 標記使用）
@@ -1289,6 +1360,20 @@ export class Game {
     this.fx.update(dt, pc, this.model, this.camera);
     // 瓦斯雲軌跡：勾住飛行、噴氣、衝刺時身後拖出白色瓦斯（衝刺最濃）
     const flying = !pc.grounded && pc.feelSpeed > 14;
+    // 推力噴流：腰後噴口往推力反方向噴；推力方向急轉（> 60°）時炸一團白煙
+    const th = pc.thrust;
+    const thk = th.length();
+    if (thk > 0.12) {
+      const yaw = this.model.yaw;
+      _nozzle.set(pc.pos.x + Math.sin(yaw) * 0.42, pc.pos.y + 0.12, pc.pos.z + Math.cos(yaw) * 0.42);
+      this.fx.thrustJet(_nozzle, th, pc.vel, this.realDt ?? dt);
+      this.burstCool = (this.burstCool || 0) - dt;
+      if (thk > 0.6 && this.lastThrust && this.burstCool <= 0 && this.lastThrust.dot(th) < Math.cos(Math.PI / 3) * this.lastThrust.length() * thk) {
+        this.fx.gasBurst(_nozzle, _v.copy(th).normalize());
+        this.burstCool = 0.3;
+      }
+      (this.lastThrust || (this.lastThrust = th.clone())).copy(th);
+    } else if (this.lastThrust) this.lastThrust.set(0, 0, 0);
     if (pc.dashing || pc.flip?.phase === 'burst' || pc.levi?.phase === 'dash') this.fx.gasTrail(pc.pos, pc.vel, 1);
     else if (pc.groundDashing) this.fx.gasTrail(pc.pos, pc.vel, 0.45);
     else if (pc.boosting || (flying && pc.anyAttached)) this.fx.gasTrail(pc.pos, pc.vel, 0.55);
@@ -1453,6 +1538,13 @@ export class Game {
       case 'dash':
         this._missionEvent('dashHold');
         this.audio.play('boost');
+        this.fx.gasBurst(this.pc.pos, _v.copy(this.pc.thrust).normalize());
+        break;
+      case 'hoverStart': // 靠近巨人：急煞 → 懸停
+        this.audio.play('boost', { vol: 0.5 });
+        this.fx.gasBurst(this.pc.pos, _v.copy(this.pc.vel).normalize(), true);
+        this.rig.addShake(0.18);
+        this.hitStop = Math.max(this.hitStop, 0.05);
         break;
       case 'flip': // 捲身翻轉開始
         this._missionEvent('flip');
@@ -1464,7 +1556,7 @@ export class Game {
         this.rig.kick(12);
         this.rig.addShake(0.25);
         this.chroma = Math.max(this.chroma, 0.35);
-        this.fx.gasPuff(this.pc.pos, this.pc.vel, true);
+        this.fx.gasBurst(this.pc.pos, _v.copy(this.pc.vel).normalize(), true);
         break;
       case 'flipDetach': // 衝到勾點自動脫勾
         this.audio.play('fling');

@@ -176,7 +176,9 @@ export class CameraRig {
     // 速度帶來的距離與 FOV（近距離廣角鏡頭：角色更大、FOV 拉更開）
     // 衝刺時鏡頭拉近角色，平常速度越快拉越遠
     const CL = opts.closeCam ? C.close : null;
-    const baseDist = CL ? CL.distance : C.distance;
+    // 目標鎖定：鏡頭拉遠、視角加寬（平滑過渡）
+    this.lockWide = (this.lockWide || 0) + ((opts.lockWide ? 1 : 0) - (this.lockWide || 0)) * Math.min(1, dt * 3);
+    const baseDist = (CL ? CL.distance : C.distance) + C.lock.wideDist * this.lockWide;
     const maxExtra = CL ? CL.maxExtraDist : C.maxExtraDist;
     const tgtDist = opts.close ? -Math.min(2.2, baseDist * 0.4) : Math.min(maxExtra, Math.max(0, speed - 8) * C.distPerSpeed);
     const tgtFov = Math.min(CL ? CL.maxExtraFov : C.maxExtraFov, Math.max(0, speed - 10) * (CL ? CL.fovPerSpeed : C.fovPerSpeed));
@@ -256,7 +258,7 @@ export class CameraRig {
     // FOV：直立手機保證最小水平視角
     const aspect = cam.aspect;
     this.fovKick *= Math.exp(-7 * dt);
-    let vfov = C.fov + this.extraFov + this.fovKick;
+    let vfov = C.fov + this.extraFov + this.fovKick + C.lock.wideFov * (this.lockWide || 0);
     const minV = (2 * Math.atan(Math.tan((C.minHFov * Math.PI) / 360) / aspect) * 180) / Math.PI;
     vfov = Math.min(C.maxVFov, Math.max(vfov, minV + this.extraFov * 0.5));
     if (Math.abs(cam.fov - vfov) > 0.01) {

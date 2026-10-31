@@ -24,13 +24,14 @@ export class Input {
     addEventListener('keydown', (e) => {
       if (e.repeat) return;
       this.keys.add(e.code);
-      const map = { KeyE: 'strike', KeyF: 'strike', KeyQ: 'releaseAll', KeyR: 'restart', Escape: 'pause', KeyH: 'help', KeyP: 'pause' };
+      const map = { KeyE: 'strike', KeyF: 'strike', KeyQ: 'releaseAll', KeyR: 'restart', Escape: 'pause', KeyH: 'help', KeyP: 'pause', KeyT: 'lock' };
       if (map[e.code]) this.queue.push(map[e.code]);
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
     });
     addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
       if (e.code === 'KeyE' || e.code === 'KeyF') this.queue.push('strikeUp'); // 長按斬擊（兵長斬）的放開
+      if (e.code === 'KeyT') this.queue.push('lockUp'); // 鎖定：短按切換、長按解除
     });
     addEventListener('blur', () => {
       this.keys.clear();

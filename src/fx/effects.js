@@ -790,6 +790,52 @@ export class Effects {
     }
   }
 
+  /**
+   * 推力噴流：從腰後噴口往「推力的反方向」噴出白色氣體。
+   * 粒子初速 = 角色速度×0.35 ＋ 噴流方向×噴速，阻力大 → 一離開噴口就散開變大，形成錐形。
+   * 往前衝（推力和移動同方向）時噴流留在身後連成一條直線；側移時噴流往側面噴。
+   * @param {THREE.Vector3} nozzle 噴口位置
+   * @param {THREE.Vector3} thrust 推力方向×強度（0～1.5）
+   */
+  thrustJet(nozzle, thrust, vel, dt) {
+    const k = Math.min(1.5, thrust.length());
+    if (k < 0.12) return;
+    const dir = _v.copy(thrust).multiplyScalar(-1 / k); // 噴流方向
+    this._jetAcc = (this._jetAcc || 0) + (60 + 140 * k) * dt;
+    while (this._jetAcc >= 1) {
+      this._jetAcc -= 1;
+      const sp = (22 + 18 * k) * (0.75 + Math.random() * 0.5);
+      const spread = 1.6 + Math.random() * 1.6;
+      const back = Math.random() * 0.4;
+      this.smoke.spawn({
+        x: nozzle.x + dir.x * back, y: nozzle.y + dir.y * back, z: nozzle.z + dir.z * back,
+        vx: vel.x * 0.35 + dir.x * sp + (Math.random() - 0.5) * spread,
+        vy: vel.y * 0.35 + dir.y * sp + (Math.random() - 0.5) * spread,
+        vz: vel.z * 0.35 + dir.z * sp + (Math.random() - 0.5) * spread,
+        max: 0.32 + Math.random() * 0.25 + k * 0.12, s0: 0.28, s1: 1.6 + k * 0.9, r: 0.97, g: 0.98, b: 1, a: 0.5 + k * 0.22, drag: 4.5,
+      });
+    }
+    // 噴口的亮白核心
+    if (Math.random() < 0.6 + k * 0.3) {
+      this.glow.spawn({ x: nozzle.x + dir.x * 0.25, y: nozzle.y + dir.y * 0.25, z: nozzle.z + dir.z * 0.25, vx: dir.x * 8 + vel.x * 0.8, vy: dir.y * 8 + vel.y * 0.8, vz: dir.z * 8 + vel.z * 0.8, max: 0.08, s0: 0.35 + k * 0.2, s1: 0.1, r: 0.85, g: 0.95, b: 1, a: 0.8 });
+    }
+  }
+
+  /** 噴氣爆發：衝刺、翻轉、急轉、開始懸停時在原地炸開一大團圓形白煙 */
+  gasBurst(pos, dir, big = false) {
+    const n = big ? 22 : 14;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, e = (Math.random() - 0.5) * Math.PI;
+      const sp = (big ? 7 : 5) * (0.5 + Math.random());
+      this.smoke.spawn({
+        x: pos.x, y: pos.y + 0.1, z: pos.z,
+        vx: Math.cos(a) * Math.cos(e) * sp - dir.x * 6, vy: Math.sin(e) * sp - dir.y * 6, vz: Math.sin(a) * Math.cos(e) * sp - dir.z * 6,
+        max: 0.7 + Math.random() * 0.5, s0: 1.2, s1: big ? 5.5 : 4, r: 0.98, g: 0.98, b: 1, a: 0.6, drag: 3.2,
+      });
+    }
+    this.shockRing(pos, big ? 4.5 : 3, '#ffffff', 0.3);
+  }
+
   /** 刀刃擦地／擦牆的火花 */
   sparks(point, vel, n = 6) {
     for (let i = 0; i < n; i++) {
