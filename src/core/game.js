@@ -19,6 +19,8 @@ import { Hud } from '../ui/hud.js';
 import { Effects } from '../fx/effects.js';
 import { Audio } from '../audio/audio.js';
 
+const SHAKE_LEVELS = { full: 1, half: 0.5, off: 0 }; // 暫停選單「畫面晃動與閃光」
+
 const _v = new THREE.Vector3();
 const _nozzle = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -140,6 +142,11 @@ export class Game {
     this.speedLineLevel = this._load('speedLines', cfg.speedLines.defaultLevel);
     if (!(this.speedLineLevel in cfg.speedLines.levels)) this.speedLineLevel = cfg.speedLines.defaultLevel;
     this.fx.speedLines.level = cfg.speedLines.levels[this.speedLineLevel];
+    // 畫面晃動與閃光：系統開了「減少動態」時預設關
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    this.shakeLevel = this._load('shakeLevel', reduceMotion ? 'off' : 'full');
+    if (!(this.shakeLevel in SHAKE_LEVELS)) this.shakeLevel = 'full';
+    this.rig.shakeScale = SHAKE_LEVELS[this.shakeLevel];
     this.pc.steerScale = Math.max(0.5, Math.min(3, Number(this._load('steerScale2', String(cfg.hook.pull.defaultSteerScale))) || cfg.hook.pull.defaultSteerScale));
     const num = (key, def, lo, hi) => {
       const v = Number(this._load(key, String(def)));
@@ -156,6 +163,7 @@ export class Game {
     this.state = 'menu';
     this.clock = new THREE.Clock();
     this.hitStop = 0;
+    this.hitSerial = 0; // 每次命中 +1：斬擊用來判斷要播「咻」（揮空）還是短的切肉聲（命中）
     this.strikeCooldown = 0;
     this.endTimer = 0;
     this.wasReady = false;
@@ -274,6 +282,13 @@ export class Game {
       this._save('speedLines', this.speedLineLevel);
       this._syncModeLabel();
     });
+    $('btn-shake').addEventListener('click', () => {
+      const order = ['full', 'half', 'off'];
+      this.shakeLevel = order[(order.indexOf(this.shakeLevel) + 1) % order.length];
+      this.rig.shakeScale = SHAKE_LEVELS[this.shakeLevel];
+      this._save('shakeLevel', this.shakeLevel);
+      this._syncModeLabel();
+    });
     const setReel = (d) => {
       this.pc.autoReel = Math.max(0, Math.min(20, this.pc.autoReel + d));
       this._save('autoReel', String(this.pc.autoReel));
@@ -335,6 +350,7 @@ export class Game {
     document.getElementById('btn-gyro').textContent = `陀螺儀瞄準：${{ high: '強', mid: '中', low: '弱', off: '關' }[this.gyroLevel]}`;
     document.getElementById('btn-joyturn').textContent = `空中左搖桿轉鏡頭：${{ high: '強', mid: '中', low: '弱', off: '關' }[this.joyTurnLevel]}`;
     document.getElementById('btn-lines').textContent = `速度線：${{ high: '高', mid: '中', low: '低', off: '關' }[this.speedLineLevel]}`;
+    document.getElementById('btn-shake').textContent = `畫面晃動與閃光：${{ full: '100%', half: '50%', off: '關' }[this.shakeLevel]}`;
     document.getElementById('sens-val').textContent = `準心靈敏度 ${Math.round(this.aimSens * 100)}%`;
     document.getElementById('btn-flick').textContent = this.touchUI.flickEnabled ? '快速甩動轉身：開' : '快速甩動轉身：關';
     document.getElementById('steer-val').textContent = `左右擺盪 ${Math.round(this.pc.steerScale * 100)}%（${Math.round(this.cfg.hook.pull.steerAccel * this.pc.steerScale)} m/s²）`;
@@ -730,12 +746,12 @@ export class Game {
     this._missionEvent('strike');
     this.strikeCooldown = this.cfg.strike.cooldown;
     this.stats.strikes++;
-    this.audio.play('slash');
     const dir = this.pc.speed > 2 ? _v2.copy(this.pc.vel).normalize() : _v2.copy(this.rig.forward);
 
     // 勾在巨人身上、而且離巨人不遠 → 迴旋斬
     const hooked = this._hookedTitan();
     if (hooked && hooked.alive && hooked.napeWorld(_v).distanceTo(this.pc.pos) < this.cfg.strike.spinRange * hooked.scale + 8) {
+      this.audio.play('slash');
       this._spinAttack(hooked);
       return;
     }
@@ -747,6 +763,7 @@ export class Game {
       if (this.pc.pos.y > 5 * t.scale) continue;
       const r = T.partRange * t.scale * this.cfg.strike.groundSpinRange;
       if (t.ankleWorld('L', _v).distanceTo(this.pc.pos) < r || t.ankleWorld('R', _v).distanceTo(this.pc.pos) < r) {
+        this.audio.play('slash');
         this._spinAttack(t, true);
         return;
       }
@@ -754,8 +771,12 @@ export class Game {
 
     this.model.startSlash();
     this.fx.slash(_v.copy(this.pc.pos).addScaledVector(dir, 1.2), dir, this.model.slashSide, false);
-    if (!this.titan.alive) return;
+    if (!this.titan.alive) {
+      this.audio.play('slash');
+      return;
+    }
     const ev = this._evaluate();
+    const hitsBefore = this.hitSerial;
     if (ev.ok) {
       this._napeHit(ev);
     } else if (this._partHit()) {
@@ -767,7 +788,7 @@ export class Game {
       this.pc.releaseAll();
       this.pc.lunge = { timer: this.cfg.strike.lungeDuration, target: () => target.napeWorld(this.napePos), done: false };
       this.audio.play('boost');
-      this.rig.addShake(0.2);
+      this.rig.addShake(this.cfg.feel.shake.move);
       this.rig.kick(10); // 衝刺斬：視角拉寬，速度感
       this.chroma = 0.45;
     } else if (this._bodyHit()) {
@@ -777,6 +798,8 @@ export class Game {
     } else if (ev.inRange && !ev.fastEnough) {
       this.hud.toast(`速度不足（需 ${(this.cfg.strike.minSpeed * this.pc.speedScale).toFixed(0)} m/s）`, 'warn', 1.2);
     }
+    // 命中：短的切肉聲（和命中音一起是「嚓—砰」）；揮空：完整的「咻」
+    this.audio.play(this.hitSerial !== hitsBefore ? 'slashCut' : 'slash');
   }
 
   /** 可以發動兵長斬的鋼索（勾住中，優先勾在巨人身上的那條）；沒有則 null */
@@ -845,7 +868,7 @@ export class Game {
       this._missionEvent('levi');
       legCut = titan.kneelTimer > kneel; // 砍到腳：交給「滑到背後」處理速度
     } else {
-      this.rig.addShake(0.3);
+      this.rig.addShake(this.cfg.feel.shake.move);
     }
     // 鋼索自動解除，帶著慣性往上彈出去（可穿過巨人身體一下）
     pc.releaseAll();
@@ -879,7 +902,7 @@ export class Game {
     this.model.startSpin();
     this.fx.spinRing(this.pc.pos);
     this.audio.play('swing');
-    this.rig.addShake(0.3);
+    this.rig.addShake(this.cfg.feel.shake.move); // 出招只是小震，命中時才大震
     this.titan = titan;
     if (ground) {
       // 地面迴旋斬：專砍腳（不需要速度）
@@ -957,16 +980,18 @@ export class Game {
   _partFx(point, label, titan) {
     const p = point.clone();
     const dir = _v2.copy(this.pc.vel).normalize();
-    this.model.startSlash();
+    this.hitSerial++;
+    this.model.slashContact(this.cfg.feel.slashContact);
+    titan.reactHit(dir, label.startsWith('眼') ? 'eye' : 'leg');
     this.fx.burst(p, 1.0, '#ffd0a0', 0.2);
     this.fx.bladeHit(p, dir, false);
     this.fx.napeHit(p, dir, false);
     titan.addWound(p, 0.9 * titan.scale);
     this.rig.punch(p);
-    this.audio.play('hitNape');
-    this.hitStop = 0.08;
+    this.audio.play('hitPart');
+    this.hitStop = this.cfg.feel.hitStop.part;
     this.slowMo = this.slowMoMax = 0.25;
-    this.rig.addShake(0.5);
+    this.rig.addShake(this.cfg.feel.shake.part);
     this.rig.kick(-6);
     this.chroma = 0.3;
     const sp = this.hud.project(p, this.camera, {});
@@ -982,11 +1007,13 @@ export class Game {
         if (this.pc.pos.distanceTo(s.center) - s.r <= (rangeOverride ?? C.bodyRange)) {
           t.takeHit(C.bodyDamage, false);
           t.addWound(_v.copy(this.pc.pos).lerp(s.center, 0.75), 0.7 * t.scale);
+          this.hitSerial++;
           this.audio.play('hitBody');
           this.fx.napeHit(_v.copy(this.pc.pos).lerp(s.center, 0.6), this.pc.vel.clone().normalize(), false);
+          t.reactHit(this.pc.vel.clone().normalize(), 'body');
           this.hud.toast('表皮傷害——瞄準後頸、眼睛或腳', '', 1.2);
-          this.rig.addShake(0.3);
-          this.hitStop = 0.05; // 小頓點
+          this.rig.addShake(this.cfg.feel.shake.graze);
+          this.hitStop = Math.max(this.hitStop, this.cfg.feel.hitStop.graze); // 小頓點
           if (!t.alive) this._onKill(t);
           return true;
         }
@@ -1005,24 +1032,30 @@ export class Game {
     if (armored) label = label || '鎧甲！';
     this.stats.napeHits++;
     this._missionEvent('nape');
-    if (!spin) this.model.startSlash();
+    this.hitSerial++;
+    // 揮刀跳到刀刃劃過的那一格：頓點停住的是「砍到了」，不是還舉在頭上的預備動作
+    if (!spin) this.model.slashContact(this.cfg.feel.slashContact);
     const dir = _v2.copy(this.pc.vel).normalize();
+    titan.reactHit(dir, 'nape', perfect ? 1.3 : 1);
     this.fx.burst(this.napePos, perfect ? 1.8 : 1.3, perfect ? '#ffb070' : '#ffd8b0', 0.24);
     this.fx.bladeHit(this.napePos, dir, perfect);
     this.fx.napeHit(this.napePos, dir, perfect);
     titan.addWound(this.napePos, 1.3 * titan.scale);
     this.rig.punch(this.napePos);
-    this.impact = this.cfg.strike.impactFrame;
-    if (perfect) this.hud.killBurst(false);
+    const flashOk = this._bigFlash();
+    if (flashOk) {
+      this.impact = this.cfg.strike.impactFrame;
+      if (perfect) this.hud.killBurst(false);
+    }
     this.audio.play('hitNape');
     // 頓點 → 慢動作 → 恢復；鏡頭往前推並猛震
     this.hitStop = perfect ? C.hitStopPerfect : C.hitStop;
     this.slowMo = this.slowMoMax = perfect ? C.slowMoPerfect : C.slowMo;
     this.rig.kick(perfect ? -14 : -9);
-    this.rig.addShake(perfect ? 1.1 : 0.75);
+    this.rig.addShake(perfect ? this.cfg.feel.shake.perfect : this.cfg.feel.shake.nape);
     this.burst = 1;
     this.chroma = perfect ? 0.6 : 0.4;
-    this.hud.flash(perfect ? 'rgba(255,225,180,0.5)' : 'rgba(255,255,255,0.3)');
+    if (flashOk) this.hud.flash(perfect ? 'rgba(255,225,180,0.5)' : 'rgba(255,255,255,0.3)');
     // 不顯示傷害數字，只用一個字強調
     const sp = this.hud.project(this.napePos, this.camera, {});
     this.hud.popup(sp.x, sp.y - 20, label || (spin ? '迴旋斬！' : perfect ? '完美斬擊！' : '斬！'), perfect ? 'perfect' : 'crit');
@@ -1037,10 +1070,14 @@ export class Game {
       if (h.active && h.object && h.object.userData.titan === titan) h.release();
     }
     if (this.grab && this.grab.titan === titan) this._endGrab(true);
-    this.audio.play('kill');
-    this.audio.play('killBoom');
-    this.impact = this.cfg.strike.impactFrame * 1.5;
-    this.hud.killBurst(true);
+    // 擊殺音錯開：命中「砰」→ 60ms 後低沉爆裂 → 再拖長尾音（同一刻疊三層低頻會糊成一團）
+    this.audio.play('killBoom', { delay: 0.06 });
+    this.audio.play('kill', { delay: 0.16 });
+    if (this._bigFlash()) {
+      this.impact = this.cfg.strike.impactFrame * 1.5;
+      this.hud.killBurst(true);
+    }
+    this.rig.addShake(this.cfg.feel.shake.kill);
     this.hitStop = 0.2;
     this.slowMo = this.slowMoMax = 1.2;
     this.rig.startKillCam(titan, this.napePos, this.pc);
@@ -1059,7 +1096,7 @@ export class Game {
     this.pc.grabbedBy = titan;
     this.grab = { titan, taps: 0 };
     this.audio.play('hurt');
-    this.rig.addShake(0.6);
+    this.rig.addShake(this.cfg.feel.shake.hurt);
     this.hud.toast(`被抓住了！連打「斬擊」掙脫 0/${this.cfg.titan.grabEscapeTaps}`, 'bad big', 3);
   }
 
@@ -1071,7 +1108,7 @@ export class Game {
     this.audio.play('hitBody');
     g.titan.grabHandWorld(_v);
     this.fx.napeHit(_v, this.rig.forward, false);
-    this.rig.addShake(0.25);
+    this.rig.addShake(this.cfg.feel.shake.graze);
     if (g.taps >= need) {
       g.titan.takeHit(6, false);
       g.titan.releaseGrab(true);
@@ -1127,6 +1164,21 @@ export class Game {
     if (!hit) return;
     this.fx.sparks(hit, pc.vel, pc.feelSpeed > 40 ? 8 : 4);
     if (Math.random() < 0.25) this.audio.play('scrape');
+  }
+
+  /**
+   * 大面積閃光（衝擊幀、白閃、擊殺放射光）的節流：同一瞬間（0.05 秒內）算一次，
+   * 每秒最多 feel.maxFlashPerSec 次；「畫面晃動與閃光」設成關時不閃。
+   */
+  _bigFlash() {
+    if (this.shakeLevel === 'off') return false;
+    const now = performance.now() / 1000;
+    const list = (this.flashTimes ||= []);
+    while (list.length && now - list[0] > 1) list.shift();
+    if (list.length && now - list[list.length - 1] < 0.05) return true;
+    if (list.length >= this.cfg.feel.maxFlashPerSec) return false;
+    list.push(now);
+    return true;
   }
 
   /** 色差（紅藍錯位）：命中與衝刺斬的瞬間 */
@@ -1331,6 +1383,7 @@ export class Game {
       closeCam: this.closeCam,
       close: !!(pc.lunge || pc.levi || pc.dashGlow > 0.35), // 衝刺時鏡頭拉近（放開後跟著速度感慢慢退）
       realDt: this.realDt,
+      frozen: this.hitStop > 0, // 頓點中：晃動停在偏移上，不衰減
     });
     // 目標鎖定標記：畫在被鎖定巨人的後頸上（在畫面外／背後就藏起來）
     const lm = (this._lockMark ||= document.getElementById('lockmark'));
@@ -1525,7 +1578,7 @@ export class Game {
       case 'land':
         this.audio.play('land', { speed: e.speed });
         if (e.speed > 6 || e.airTime > 0.6) this.fx.dust(this.pc.pos, this.pc.vel, e.slide ? 14 : 6);
-        if (e.slide) this.rig.addShake(Math.min(0.35, e.speed / 120));
+        if (e.slide) this.rig.addShake(Math.min(this.cfg.feel.shake.move, e.speed / 300));
         break;
       case 'fling':
         this._missionEvent('fling');
@@ -1540,11 +1593,10 @@ export class Game {
         this.audio.play('boost');
         this.fx.gasBurst(this.pc.pos, _v.copy(this.pc.thrust).normalize());
         break;
-      case 'hoverStart': // 靠近巨人：急煞 → 懸停
-        this.audio.play('boost', { vol: 0.5 });
+      case 'hoverStart': // 靠近巨人：急煞 → 懸停（不停格：停格只留給命中；煞車感交給鏡頭臂彈簧往前衝）
+        this.audio.play('hover');
         this.fx.gasBurst(this.pc.pos, _v.copy(this.pc.vel).normalize(), true);
-        this.rig.addShake(0.18);
-        this.hitStop = Math.max(this.hitStop, 0.05);
+        this.rig.addShake(this.cfg.feel.shake.move * 0.8);
         break;
       case 'flip': // 捲身翻轉開始
         this._missionEvent('flip');
@@ -1554,14 +1606,14 @@ export class Game {
       case 'flipBurst': // 翻完 → 爆衝
         this.audio.play('boost');
         this.rig.kick(12);
-        this.rig.addShake(0.25);
+        this.rig.addShake(this.cfg.feel.shake.move);
         this.chroma = Math.max(this.chroma, 0.35);
         this.fx.gasBurst(this.pc.pos, _v.copy(this.pc.vel).normalize(), true);
         break;
       case 'flipDetach': // 衝到勾點自動脫勾
         this.audio.play('fling');
         this.fx.gasPuff(this.pc.pos, this.pc.vel, true);
-        this.rig.addShake(0.15);
+        this.rig.addShake(this.cfg.feel.shake.move);
         break;
       case 'flipEnd':
         this.fx.gasPuff(this.pc.pos, this.pc.vel, true);
@@ -1579,14 +1631,14 @@ export class Game {
       case 'leviDash':
         this.audio.play('boost');
         this.rig.kick(12);
-        this.rig.addShake(0.35);
+        this.rig.addShake(this.cfg.feel.shake.move);
         this.chroma = 0.55;
         this.burst = 1;
         break;
       case 'dashArrive':
         this._missionEvent('dash');
         this.audio.play('fling');
-        this.rig.addShake(0.15);
+        this.rig.addShake(this.cfg.feel.shake.move);
         this.fx.gasPuff(this.pc.pos, this.pc.vel, true);
         break;
       case 'arrive':
@@ -1602,7 +1654,7 @@ export class Game {
         this.stats.hurt = true;
         this.audio.play('hurt');
         this.hud.hurt();
-        this.rig.addShake(0.8);
+        this.rig.addShake(this.cfg.feel.shake.hurt);
         if (this.pc.hp <= 0) {
           this.hud.toast('你被巨人擊倒了…', 'bad big', 2.5);
         } else {
@@ -1655,7 +1707,7 @@ export class Game {
       case 'rockHit':
         if (!this.grab) this.pc.damage(this.cfg.titan.thrower.damage, e.knock);
         this.fx.rockShatter(e.pos, true);
-        this.rig.addShake(0.9);
+        this.rig.addShake(this.cfg.feel.shake.hurt);
         break;
       case 'rockLand': {
         const rd = e.pos.distanceTo(this.pc.pos);
@@ -1670,7 +1722,7 @@ export class Game {
         break;
       case 'armorBreak':
         this.fx.armorShards(titan.napeWorld(_v), true);
-        this.rig.addShake(0.6);
+        this.rig.addShake(this.cfg.feel.shake.part);
         this.hud.toast('鎧甲碎裂！後頸露出來了！', 'good', 1.4);
         break;
       case 'steamWindup':
@@ -1714,7 +1766,7 @@ export class Game {
         this.hud.toast(`${titan.name}：眼睛受傷，暈眩 ${this.cfg.titan.stunTime} 秒！`, 'good', 1.8);
         break;
       case 'kneel':
-        this.rig.addShake(0.5);
+        this.rig.addShake(this.cfg.feel.shake.part);
         this.audio.play('step', { vol: 0.6 });
         this.hud.toast(`${titan.name}：腳筋被砍，跪下了！趁現在砍後頸`, 'good', 2);
         break;

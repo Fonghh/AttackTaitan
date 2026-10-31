@@ -204,6 +204,15 @@ export const CONFIG = {
     slowMoScale: 0.25, // 慢動作開始時的時間倍率
   },
 
+  // 打擊感分級：全遊戲的晃動只用這幾級（trauma 0～1，畫面晃動 = 最大值 × trauma²）
+  // move＝移動、出手（不停格）；graze＝擦傷；part＝眼睛／腳／鎧甲；nape／perfect／kill＝致命
+  feel: {
+    shake: { move: 0.12, graze: 0.25, part: 0.5, nape: 0.8, perfect: 1.0, kill: 1.0, hurt: 0.75 },
+    hitStop: { graze: 0.03, part: 0.07 }, // 後頸／完美／擊殺沿用 strike.hitStop 系列
+    maxFlashPerSec: 3, // 大面積閃光（衝擊幀、全螢幕白閃、擊殺放射光）每秒上限（WCAG 2.3.1）
+    slashContact: 0.5, // 命中時揮刀動畫直接跳到這個進度（0～1；0.5≈雙刀剛劃過身前），停格才停在刀砍到的那一格
+  },
+
   titan: {
     hp: 100,
     walkSpeed: 3.2,
@@ -295,8 +304,16 @@ export const CONFIG = {
     fov: 70,
     fovPerSpeed: 0.28,
     maxExtraFov: 22,
-    minHFov: 78, // 直立手機時保證的最小水平視角
-    maxVFov: 105,
+    minHFov: 78, // 直立手機時希望的最小水平視角（基準 FOV 會被 maxVFov − fovHeadroom 限住）
+    maxVFov: 112,
+    fovHeadroom: 14, // 基準 FOV 至少留這麼多度給速度、衝刺、命中推拉（否則直立手機上 FOV 永遠卡在上限）
+    maxHFov: 120, // 橫向螢幕（PC）水平視角上限，避免全速時邊緣拉得太變形
+    // 晃動（trauma 模型）：位移／旋轉 = 最大值 × trauma² × 平滑雜訊；用真實時間衰減，頓點時畫面靜止在偏移上
+    shake: { maxRot: 0.06, maxOffset: 0.12, decay: 1.3, freq: 22 },
+    // 高速持續晃動：速度越快越明顯，低頻、以旋轉為主
+    rumble: { minSpeed: 25, fullSpeed: 70, maxRot: 0.01, freq: 6 },
+    // 鏡頭臂彈簧：沿鏡頭前方的加速度 → 鏡頭被甩在後面（加速）或往前衝（煞車），有過衝
+    boom: { gain: 0.75, stiffness: 60, damping: 10, maxBack: 2.2, maxFwd: 1.2, accelSmooth: 14, maxAccel: 300 },
     offsetSmooth: 10,
     autoFollow: false, // 空中自動轉向飛行方向（預設關閉，暫停選單可開啟）
     autoFollowRate: 2.2,

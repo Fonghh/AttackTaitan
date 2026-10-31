@@ -16,7 +16,14 @@ export class Audio {
     const ctx = (this.ctx = new AC());
     this.master = ctx.createGain();
     this.master.gain.value = 0.7;
-    this.master.connect(ctx.destination);
+    // 壓縮器：擊殺時好幾層低頻同時響也不會破音
+    this.comp = ctx.createDynamicsCompressor();
+    this.comp.threshold.value = -14;
+    this.comp.knee.value = 10;
+    this.comp.ratio.value = 6;
+    this.comp.attack.value = 0.003;
+    this.comp.release.value = 0.2;
+    this.master.connect(this.comp).connect(ctx.destination);
 
     const len = ctx.sampleRate * 2;
     this.noise = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -55,7 +62,10 @@ export class Audio {
   _noiseBurst({ dur = 0.2, type = 'bandpass', f0 = 2000, f1 = 2000, q = 1, vol = 0.5, attack = 0.005 }) {
     if (!this.ctx) return;
     const ctx = this.ctx;
-    const t = ctx.currentTime;
+    const t = ctx.currentTime + (this.delay || 0);
+    const pv = this.pitchVar || 1;
+    f0 *= pv;
+    f1 *= pv;
     const src = ctx.createBufferSource();
     src.buffer = this.noise;
     src.playbackRate.value = 0.8 + Math.random() * 0.4;
@@ -76,7 +86,10 @@ export class Audio {
   _tone({ dur = 0.2, type = 'sine', f0 = 440, f1 = 440, vol = 0.3, attack = 0.003 }) {
     if (!this.ctx) return;
     const ctx = this.ctx;
-    const t = ctx.currentTime;
+    const t = ctx.currentTime + (this.delay || 0);
+    const pv = this.pitchVar || 1;
+    f0 *= pv;
+    f1 *= pv;
     const o = ctx.createOscillator();
     o.type = type;
     o.frequency.setValueAtTime(f0, t);
@@ -90,8 +103,21 @@ export class Audio {
     o.stop(t + dur + 0.05);
   }
 
+  /**
+   * opts.delay：延後幾秒播（讓幾層聲音錯開）；opts.pitch：音高倍率。
+   * 命中類音效每次音高隨機 ±8%，連砍不會一模一樣。
+   */
   play(name, opts = {}) {
     if (!this.ctx || this.muted) return;
+    const vary = Audio.VARY.has(name) ? 0.92 + Math.random() * 0.16 : 1;
+    this.pitchVar = vary * (opts.pitch || 1);
+    this.delay = opts.delay || 0;
+    this._play(name, opts);
+    this.pitchVar = 1;
+    this.delay = 0;
+  }
+
+  _play(name, opts) {
     switch (name) {
       case 'hookFire':
         this._noiseBurst({ dur: 0.18, f0: 5000, f1: 1500, q: 2, vol: 0.35 });
@@ -121,6 +147,19 @@ export class Audio {
         this._tone({ dur: 0.35, type: 'sine', f0: 140, f1: 45, vol: 0.7 });
         this._noiseBurst({ dur: 0.4, type: 'lowpass', f0: 3000, f1: 300, vol: 0.6 });
         this._tone({ dur: 0.5, type: 'triangle', f0: 2200, f1: 1800, vol: 0.12 });
+        break;
+      case 'slashCut': // 命中時的刀聲：短、利，不拖一條長長的「咻」
+        this._noiseBurst({ dur: 0.09, type: 'highpass', f0: 5200, f1: 2600, q: 1, vol: 0.4, attack: 0.002 });
+        this._tone({ dur: 0.06, type: 'sawtooth', f0: 3200, f1: 1400, vol: 0.06 });
+        break;
+      case 'hitPart': // 眼睛／腳：比後頸輕、比較高
+        this._tone({ dur: 0.22, type: 'sine', f0: 220, f1: 90, vol: 0.5 });
+        this._noiseBurst({ dur: 0.22, type: 'lowpass', f0: 3600, f1: 500, vol: 0.45 });
+        this._tone({ dur: 0.25, type: 'triangle', f0: 1700, f1: 1500, vol: 0.08 });
+        break;
+      case 'hover': // 急煞懸停：氣閥「噗」一聲
+        this._noiseBurst({ dur: 0.28, type: 'lowpass', f0: 1400, f1: 260, q: 0.7, vol: 0.38, attack: 0.004 });
+        this._tone({ dur: 0.12, type: 'sine', f0: 180, f1: 110, vol: 0.18 });
         break;
       case 'hitBody':
         this._tone({ dur: 0.15, type: 'sine', f0: 200, f1: 80, vol: 0.35 });
@@ -184,3 +223,5 @@ export class Audio {
     this.muted = m;
   }
 }
+
+Audio.VARY = new Set(['hitNape', 'hitPart', 'hitBody', 'slash', 'slashCut', 'swing', 'hookAttach', 'land', 'boost', 'hover', 'kill', 'killBoom']);

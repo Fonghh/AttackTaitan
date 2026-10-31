@@ -5,6 +5,10 @@ const _target = new THREE.Vector3();
 const _desired = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _right = new THREE.Vector3();
+const _acc = new THREE.Vector3();
+
+// 平滑雜訊：幾個不同頻率的 sin 疊加（每幀 Math.random() 會變成刺耳的亂抖）
+const wobble = (t, seed) => 0.6 * Math.sin(t * 1.0 + seed) + 0.4 * Math.sin(t * 2.13 + seed * 1.7);
 
 export class CameraRig {
   constructor(camera, cfg, blockers) {
@@ -24,7 +28,13 @@ export class CameraRig {
     this.pitch = -0.12;
     this.extraDist = 0;
     this.extraFov = 0;
-    this.shake = 0;
+    this.shake = 0; // trauma 0～1
+    this.shakeScale = this.shakeScale ?? 1; // 暫停選單「畫面晃動」
+    this.noiseT = 0;
+    this.boom = 0; // 鏡頭臂彈簧的額外距離（正＝被甩在後面）
+    this.boomV = 0;
+    this.accS = 0;
+    this.lastVel = null;
     this.fovKick = 0;
     this.cine = null;
     this.lastManualLook = -10;
@@ -77,7 +87,58 @@ export class CameraRig {
   }
 
   addShake(a) {
-    this.shake = Math.min(1.2, this.shake + a);
+    this.shake = Math.min(1, this.shake + a * this.shakeScale);
+  }
+
+  /**
+   * 晃動：命中的 trauma（平滑雜訊、旋轉為主）＋高速持續的低頻晃動。
+   * 用真實時間衰減；頓點中（frozen）雜訊時間和衰減都停住，畫面靜止在被撞歪的那一格。
+   */
+  _applyShake(cam, rdt, frozen, speed) {
+    const SH = this.cfg.camera.shake;
+    const RB = this.cfg.camera.rumble;
+    if (!frozen) {
+      this.noiseT += rdt;
+      this.shake = Math.max(0, this.shake - SH.decay * rdt);
+    }
+    const s = this.shake * this.shake;
+    const t = this.noiseT * SH.freq;
+    const r = Math.max(0, Math.min(1, (speed - RB.minSpeed) / (RB.fullSpeed - RB.minSpeed))) * this.shakeScale;
+    const tr = this.noiseT * RB.freq;
+    const rx = SH.maxRot * s * wobble(t, 1.3) + RB.maxRot * r * wobble(tr, 4.1);
+    const ry = SH.maxRot * s * wobble(t, 7.9) + RB.maxRot * r * wobble(tr, 2.2) * 0.6;
+    const rz = SH.maxRot * s * wobble(t, 3.7) * 1.4 + RB.maxRot * r * wobble(tr, 9.4);
+    cam.updateMatrix();
+    if (s > 1e-5) {
+      _right.setFromMatrixColumn(cam.matrix, 0);
+      _dir.setFromMatrixColumn(cam.matrix, 1);
+      cam.position.addScaledVector(_right, SH.maxOffset * s * wobble(t, 5.5)).addScaledVector(_dir, SH.maxOffset * s * wobble(t, 8.8));
+    }
+    if (rx || ry || rz) {
+      cam.rotateX(rx);
+      cam.rotateY(ry);
+      cam.rotateZ(rz);
+    }
+  }
+
+  /** 鏡頭臂彈簧：加速時鏡頭被甩在後面、煞車時往前衝一點再彈回（彈簧阻尼，會過衝） */
+  _updateBoom(dt, pc, f) {
+    const B = this.cfg.camera.boom;
+    if (!this.lastVel) this.lastVel = pc.vel.clone();
+    if (dt < 1e-5) return;
+    _acc.subVectors(pc.vel, this.lastVel).multiplyScalar(1 / dt);
+    this.lastVel.copy(pc.vel);
+    const along = Math.max(-B.maxAccel, Math.min(B.maxAccel, _acc.dot(f)));
+    this.accS += (along - this.accS) * Math.min(1, B.accelSmooth * dt);
+    // x'' = -k·x - c·x' + gain·a；穩態 x = gain·a / k
+    const steps = Math.max(1, Math.ceil(dt / 0.008));
+    const h = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      this.boomV += (-B.stiffness * this.boom - B.damping * this.boomV + B.gain * this.accS) * h;
+      this.boom += this.boomV * h;
+    }
+    if (this.boom > B.maxBack) { this.boom = B.maxBack; this.boomV = Math.min(0, this.boomV); }
+    if (this.boom < -B.maxFwd) { this.boom = -B.maxFwd; this.boomV = Math.max(0, this.boomV); }
   }
 
   /** 手動轉視角（滑鼠或觸控拖曳） */
@@ -100,6 +161,7 @@ export class CameraRig {
       this._cineFrame(false);
       this.camera.position.lerp(c.pos, 0.2);
       this.camera.lookAt(c.look);
+      this._applyShake(this.camera, opts.realDt ?? dt, opts.frozen, 0);
       if (Math.abs(this.camera.fov - 55) > 0.01) {
         this.camera.fov = 55;
         this.camera.updateProjectionMatrix();
@@ -189,7 +251,8 @@ export class CameraRig {
     // 目標點：角色上方，並加一點速度前導，方便預判下一勾
     _target.copy(pc.pos);
     _target.y += C.targetHeight;
-    const dist = baseDist + this.extraDist;
+    this._updateBoom(dt, pc, f);
+    const dist = Math.max(0.8, baseDist + this.extraDist + this.boom);
 
     // 貼地高速飛行：鏡頭壓低，地面從旁邊刷過去
     const G = C.groundSkim;
@@ -218,15 +281,6 @@ export class CameraRig {
     cam.position.copy(_target).addScaledVector(_dir, this.distSmooth);
     if (cam.position.y < 0.4) cam.position.y = 0.4;
 
-    // 震動
-    if (this.shake > 0) {
-      const s = this.shake * this.shake * 0.5;
-      cam.position.x += (Math.random() - 0.5) * s;
-      cam.position.y += (Math.random() - 0.5) * s;
-      cam.position.z += (Math.random() - 0.5) * s;
-      this.shake = Math.max(0, this.shake - dt * 2.5);
-    }
-
     // 命中推近
     if (this.punchT > 0) {
       const P = this.cfg.camera.punch;
@@ -254,13 +308,18 @@ export class CameraRig {
     }
     this.roll += (tgtRoll - this.roll) * Math.min(1, R.rate * dt);
     if (Math.abs(this.roll) > 1e-4) cam.rotateZ(this.roll);
+    this._applyShake(cam, opts.realDt ?? dt, opts.frozen, speed);
 
     // FOV：直立手機保證最小水平視角
     const aspect = cam.aspect;
     this.fovKick *= Math.exp(-7 * dt);
-    let vfov = C.fov + this.extraFov + this.fovKick + C.lock.wideFov * (this.lockWide || 0);
+    // 基準 FOV（直立手機保證水平視角）先留 fovHeadroom 給速度／衝刺／命中推拉，再疊上去；
+    // 以前是最後才夾 maxVFov，直立手機的基準就超過上限，速度 FOV、命中推近全部失效
     const minV = (2 * Math.atan(Math.tan((C.minHFov * Math.PI) / 360) / aspect) * 180) / Math.PI;
-    vfov = Math.min(C.maxVFov, Math.max(vfov, minV + this.extraFov * 0.5));
+    const base = Math.min(C.maxVFov - C.fovHeadroom, Math.max(C.fov, minV));
+    let vfov = base + this.extraFov + this.fovKick + C.lock.wideFov * (this.lockWide || 0);
+    const maxVfromH = (2 * Math.atan(Math.tan((C.maxHFov * Math.PI) / 360) / aspect) * 180) / Math.PI;
+    vfov = Math.max(30, Math.min(C.maxVFov, Math.max(base, maxVfromH), vfov));
     if (Math.abs(cam.fov - vfov) > 0.01) {
       cam.fov = vfov;
       cam.updateProjectionMatrix();
