@@ -377,6 +377,12 @@ export class Titan {
     if (this.heldRock) this.heldRock.visible = false;
     this.steamT = this.kind === 'steam' ? T.steam.interval * 0.6 : 0;
     this.steamPhase = 'idle'; // idle | charge | burst
+    this.react = null;
+    this.alertT = 0; // 同伴被殺：轉頭看的剩餘秒數
+    this.enrageT = 0; // 被激怒：走得比較快的剩餘秒數
+    this.slammed = false; // 死亡時撲倒落地了沒
+    for (const c of this.chunks || []) this.scene.remove(c.mesh);
+    this.chunks = [];
     this.steamHitDone = false;
     for (const w of this.wounds || []) w.mesh.parent?.remove(w.mesh);
     this.wounds = [];
@@ -503,6 +509,62 @@ export class Titan {
     this.react = { t: 0, neckX: A[0] * strength, spineX: A[1] * strength, roll: A[2] * strength * side, yaw: 0.25 * strength * side };
   }
 
+  /** 同伴被殺：轉頭看向那裡一下，然後被激怒（走快一點） */
+  alert(pos) {
+    if (!this.alive || this.dummy) return;
+    this.alertT = 1.4;
+    this.alertPos = pos.clone();
+    this.enrageT = 7;
+  }
+
+  /** 斷肢肉塊：從砍中的地方噴出幾塊圓角肉塊，落地彈幾下、冒蒸氣後縮小消失 */
+  spawnChunks(point, dir, n = 2, size = 1) {
+    if (!this.chunkGeo) this.chunkGeo = new THREE.IcosahedronGeometry(0.9, 1);
+    for (let i = 0; i < n; i++) {
+      const mesh = new THREE.Mesh(this.chunkGeo, this.skin);
+      const sc = size * this.scale * (0.6 + Math.random() * 0.6);
+      mesh.scale.set(sc * 1.3, sc, sc);
+      mesh.position.copy(point);
+      mesh.castShadow = true;
+      if (this.outlineMat) {
+        const ol = new THREE.Mesh(this.chunkGeo, this.outlineMat);
+        ol.raycast = () => {};
+        mesh.add(ol);
+      }
+      this.scene.add(mesh);
+      const v = new THREE.Vector3((Math.random() - 0.5) * 10, 8 + Math.random() * 8, (Math.random() - 0.5) * 10);
+      if (dir) v.addScaledVector(dir, 10);
+      this.chunks.push({ mesh, vel: v, spin: new THREE.Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8), t: 0, r: sc, s: sc });
+    }
+  }
+
+  _updateChunks(dt) {
+    for (let i = this.chunks.length - 1; i >= 0; i--) {
+      const c = this.chunks[i];
+      c.t += dt;
+      c.vel.y -= 28 * dt;
+      c.mesh.position.addScaledVector(c.vel, dt);
+      c.mesh.rotation.x += c.spin.x * dt;
+      c.mesh.rotation.y += c.spin.y * dt;
+      if (c.mesh.position.y < c.r * 0.7) {
+        c.mesh.position.y = c.r * 0.7;
+        c.vel.y = Math.abs(c.vel.y) * 0.35;
+        c.vel.x *= 0.6;
+        c.vel.z *= 0.6;
+        c.spin.multiplyScalar(0.6);
+        if (!c.landed) {
+          c.landed = true;
+          this.events.push({ type: 'chunkLand', pos: c.mesh.position.clone() });
+        }
+      }
+      if (c.t > 2.5) c.mesh.scale.multiplyScalar(Math.exp(-4 * dt));
+      if (c.t > 3.5) {
+        this.scene.remove(c.mesh);
+        this.chunks.splice(i, 1);
+      }
+    }
+  }
+
   takeHit(damage, isNape) {
     if (!this.alive) return;
     if (isNape && this.armor > 0) {
@@ -573,6 +635,11 @@ export class Titan {
     this.stateTime += dt;
     this.attackCooldown -= dt;
     if (this.hitFlash > 0) this.hitFlash -= dt;
+    if (this.alertT > 0) this.alertT -= dt;
+    if (this.enrageT > 0) this.enrageT -= dt;
+    if (this.chunks.length) this._updateChunks(dt);
+    // 眼睛被砍：摀著臉往後退
+    if (this.stunTimer > T.stunTime - 0.7 && this.alive && !this.dummy && this.state !== 'holding') this.root.position.addScaledVector(this.forward, -2.5 * S * dt);
     if (this.stunTimer > 0) this.stunTimer -= dt;
     if (this.kneelTimer > 0) this.kneelTimer -= dt;
     this.kneelAmount += ((this.kneelTimer > 0 ? 1 : 0) - this.kneelAmount) * Math.min(1, dt * 4);
@@ -628,7 +695,7 @@ export class Titan {
         }
         if (aggro && !kneeling && dist > T.chaseDist * S) {
           if (this.state !== 'walk') this.setState('walk');
-          _v.set(this.forward.x, 0, this.forward.z).multiplyScalar(T.walkSpeed * S * dt * (this.kind === 'armored' ? T.armored.walkFactor : 1));
+          _v.set(this.forward.x, 0, this.forward.z).multiplyScalar(T.walkSpeed * S * dt * (this.kind === 'armored' ? T.armored.walkFactor : 1) * (this.enrageT > 0 ? 1.45 : 1));
           pos.add(_v);
           // 地盤範圍：不會離家太遠
           const hx = pos.x - this.spawn.x, hz = pos.z - this.spawn.z;
@@ -746,13 +813,20 @@ export class Titan {
         }
         break;
       case 'stagger':
+        // 後頸被砍（沒死）：往前踉蹌兩步
+        if (this.stateTime < 0.6) pos.addScaledVector(this.forward, 3.2 * S * dt);
         if (this.stateTime >= T.staggerTime) {
           this.setState('idle');
           this.attackCooldown = Math.max(this.attackCooldown, 1.2);
         }
         break;
       case 'dying':
-        if (this.stateTime >= 2.2) {
+        // 分段倒下：頭往後甩（0～0.35 秒）→ 跪下（～1.0）→ 往前撲倒（～1.7，落地揚起塵土）
+        if (!this.slammed && this.stateTime >= 1.7) {
+          this.slammed = true;
+          this.events.push({ type: 'bodySlam', pos: this.head.getWorldPosition(new THREE.Vector3()).setY(0.5) });
+        }
+        if (this.stateTime >= 2.4) {
           this.setState('dead');
           this.events.push({ type: 'dead' });
         }
@@ -1060,6 +1134,7 @@ export class Titan {
     let pelvisY = 9;
 
     let crouch = 0; // 奇行種蹲低（0～1）
+    let deathKneel = 0; // 死亡時跪下的程度
     if (s === 'walk' && this.kind === 'abnormal') {
       // 奇行種狂奔：大步、上身前傾、手臂往後亂甩、頭歪來歪去
       const ph = this.walkPhase;
@@ -1141,21 +1216,35 @@ export class Titan {
       neckX = -0.1;
       spineX = 0.1 + Math.sin(t * 18) * 0.02;
     } else if (s === 'stagger') {
+      // 後頸被砍：往前踉蹌、右手摸後頸、左手往前撐
       const p = Math.min(1, k / 0.25);
+      const step = Math.sin(Math.min(1, k / 0.6) * Math.PI * 2);
       spineX = 0.5 * p;
-      neckX = 0.5 * p;
-      armLX = armRX = -0.6 * p;
+      neckX = 0.55 * p;
+      armRX = -2.9 * p;
+      armRZ = -0.2 - 0.9 * p;
+      elbowR = -2.0 * p;
+      armLX = -0.9 * p;
+      legA = step * 0.4;
       pelvisY = 9 - 0.8 * p;
     } else if (s === 'dying' || s === 'dead') {
-      const p = Math.min(1, k / 2.2);
-      this.fall.rotation.x = easeInQuad(p) * 1.48;
-      this.fall.position.y = -p * 0.5;
-      spineX = 0.4;
-      neckX = 0.6;
-      armLX = armRX = -0.4 * p;
-      armLZ = 0.8 * p;
-      armRZ = -0.8 * p;
-      if (s === 'dead') this.fall.rotation.x = 1.48;
+      // 分段倒下：① 頭往後甩、雙手往上甩（0～0.35）② 跪下（～1.0）③ 往前撲倒（～1.7）④ 趴著微微彈一下
+      const kk = s === 'dead' ? 9 : k;
+      const a = Math.min(1, kk / 0.35);
+      const b = Math.max(0, Math.min(1, (kk - 0.35) / 0.65));
+      const c = Math.max(0, Math.min(1, (kk - 1.0) / 0.7));
+      const bounce = kk > 1.7 ? Math.exp(-6 * (kk - 1.7)) * Math.sin((kk - 1.7) * 18) * 0.04 : 0;
+      neckX = -0.9 * a * (1 - c) + 0.6 * c;
+      spineX = -0.25 * a * (1 - b) + 0.3 * b + 0.2 * c;
+      armLX = armRX = -2.2 * a * (1 - b) - 0.4 * b + (-2.4) * c;
+      armLZ = 0.4 * a + 0.4 * c;
+      armRZ = -0.4 * a - 0.4 * c;
+      elbowL = elbowR = -0.4;
+      deathKneel = b;
+      this.fall.rotation.x = easeInQuad(c) * 1.32 + bounce;
+      // 先跪下再往前倒：身體已經比較低，倒地時往上抬一點，才不會陷進地面
+      this.fall.position.y = c * 2.6;
+      this.fall.position.z = c * 1.5;
     }
 
     // 暈眩：雙手摀眼、頭亂晃
@@ -1179,8 +1268,19 @@ export class Titan {
       reactRoll = r.roll * a;
       if (r.t > 0.8) this.react = null;
     }
-    // 跪下：骨盆下沉、大腿往前、小腿往後
-    const kn = this.alive ? this.kneelAmount : 0;
+    // 同伴被殺：轉頭看向那裡
+    if (this.alertT > 0 && this.alertPos && this.alive) {
+      const ay = Math.atan2(this.alertPos.x - this.root.position.x, this.alertPos.z - this.root.position.z) - this.yaw;
+      neckY += Math.max(-1.1, Math.min(1.1, Math.atan2(Math.sin(ay), Math.cos(ay)))) * Math.min(1, this.alertT / 0.3);
+    }
+    // 跪下：骨盆下沉、大腿往前、小腿往後（死亡時也會先跪下）
+    const kn = this.alive ? this.kneelAmount : deathKneel;
+    if (this.alive && kn > 0.3 && this.stunTimer <= 0 && s !== 'holding') {
+      // 腳被砍跪下：左手撐地
+      armLX = -0.5 * kn;
+      armLZ = 0.15;
+      elbowL = -0.2;
+    }
     pelvisY -= kn * 4.2;
     const hipK = -1.25 * kn - 1.1 * crouch;
     const kneeK = 2.2 * kn + 2.0 * crouch;

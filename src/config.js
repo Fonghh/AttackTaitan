@@ -132,6 +132,18 @@ export const CONFIG = {
       gas: 15,
       cooldown: 0.8,
     },
+    // 後翻：左搖桿往後拉＋空中快速點兩下衝刺。往後上方翻一圈拉開距離，翻的途中或剛翻完按斬擊＝迴旋斬
+    backflip: {
+      time: 0.6, // 翻一圈的秒數
+      up: 15, // 往上的初速 m/s
+      back: 13, // 往後（鏡頭反方向）的初速 m/s
+      gravity: 0.55, // 翻轉中的重力倍率
+      hang: 0.35, // 翻完後的短暫滯空
+      slashWindow: 0.45, // 翻完後還能接迴旋斬的秒數
+      gas: 12,
+    },
+    // 勾在巨人身上衝刺：直衝後頸（不放大擺盪），路線會繞開巨人的身體（從背後上去）
+    titanDash: { avoidMargin: 2.5, avoidAccel: 160 },
   },
 
   boost: {

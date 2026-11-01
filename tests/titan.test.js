@@ -86,3 +86,65 @@ test('steam: charges, bursts, pushes a nearby player away and burns once', () =>
   assert.ok(ev.filter((e) => e.type === 'steamHit').length === 1);
   assert.ok(p.vel.z < -0.5, `pushed away from the nape (vz ${p.vel.z.toFixed(2)})`);
 });
+
+import { PlayerController } from '../src/player/playerController.js';
+
+const pIdle = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false });
+
+test('dash on a titan nape hook: no stick needed, goes around the body and reaches the nape (not stuck at the waist)', () => {
+  const t = new Titan(new Scene(), { ...CONFIG, style: 'toon' }, { name: '目標', x: 0, z: 0, yaw: 0, scale: 1 });
+  t.root.updateMatrixWorld(true);
+  t._updateSpheres();
+  const nape = t.napeWorld(new Vector3());
+  const p = new PlayerController(CONFIG);
+  p.speedScale = CONFIG.player.defaultSpeedScale;
+  p.pos.set(3, 9, 26); // 巨人正前方、腰的高度
+  p.fireHook('right', p.pos.clone(), { point: nape.clone(), object: t.nape });
+  const world = { colliders: [], wallRadius: 270, camYaw: 0, camForward: new Vector3(0, 0, -1) };
+  let minNape = Infinity, minChest = Infinity, minHead = Infinity;
+  for (let i = 0; i < 150; i++) {
+    p.update(1 / 60, { ...pIdle(), boost: true, boostPressed: i === 0 }, world);
+    minNape = Math.min(minNape, p.pos.distanceTo(t.napeWorld(new Vector3())));
+    minChest = Math.min(minChest, p.pos.distanceTo(t.spheres[2].center) - t.spheres[2].r);
+    minHead = Math.min(minHead, p.pos.distanceTo(t.spheres[3].center) - t.spheres[3].r);
+  }
+  assert.ok(minNape < 7, `got within ${minNape.toFixed(1)} m of the nape`);
+  assert.ok(minChest > -0.5 && minHead > -0.5, `stayed outside the body (chest ${minChest.toFixed(1)}, head ${minHead.toFixed(1)})`);
+});
+
+test('backflip: stick pulled back + double-tap dash flips up and back, then opens a spin-slash window', () => {
+  const p = new PlayerController(CONFIG);
+  p.pos.set(0, 30, 0);
+  const world = { colliders: [], wallRadius: 270, camYaw: 0, camForward: new Vector3(0, 0, -1) };
+  const back = { x: 0, y: -1 };
+  let flipped = false;
+  for (let i = 0; i < 8; i++) {
+    const press = i === 0 || i === 6;
+    p.update(1 / 60, { ...pIdle(), move: back, boost: press, boostPressed: press }, world);
+    if (p.flip?.back) flipped = true;
+  }
+  assert.ok(flipped, 'backflip started');
+  const z0 = p.pos.z, y0 = p.pos.y;
+  for (let i = 0; i < 40; i++) p.update(1 / 60, pIdle(), world);
+  assert.ok(p.pos.z > z0 + 3 && p.pos.y > y0, `moved back ${(p.pos.z - z0).toFixed(1)} m and up ${(p.pos.y - y0).toFixed(1)} m`);
+  assert.ok(!p.flip && p.backSlashWindow > 0, 'flip ended with a spin-slash window');
+});
+
+test('titan death: kneels then falls forward with a body slam; chunks fly; nearby titans get alerted', () => {
+  const scene = new Scene();
+  const t = new Titan(scene, CONFIG, { name: '倒下', x: 0, z: 0 });
+  const other = new Titan(scene, CONFIG, { name: '旁邊', x: 30, z: 0 });
+  t.spawnChunks(t.napeWorld(new Vector3()), new Vector3(0, 0, 1), 3);
+  assert.equal(t.chunks.length, 3);
+  t.takeHit(999, true);
+  const p = { pos: new Vector3(0, 0, 80), vel: new Vector3(), hp: 100 };
+  const ev = [];
+  for (let i = 0; i < 60 * 2.5; i++) {
+    t.update(1 / 60, p, { colliders: [] });
+    ev.push(...t.events.splice(0));
+  }
+  assert.ok(ev.some((e) => e.type === 'bodySlam') && ev.some((e) => e.type === 'dead'), ev.map((e) => e.type).join(','));
+  assert.ok(ev.some((e) => e.type === 'chunkLand'), 'chunks land');
+  other.alert(t.root.position);
+  assert.ok(other.alertT > 0 && other.enrageT > 0);
+});

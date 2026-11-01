@@ -836,6 +836,19 @@ export class Effects {
     this.shockRing(pos, big ? 4.5 : 3, '#ffffff', 0.3);
   }
 
+  /** 巨人撲倒落地：一大圈塵土往外噴、地面衝擊波、蒸氣往上冒 */
+  bodySlam(pos, scale = 1) {
+    for (let i = 0; i < 40; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = (8 + Math.random() * 14) * scale;
+      this.smoke.spawn({ x: pos.x + Math.cos(a) * 3 * scale, y: 0.6, z: pos.z + Math.sin(a) * 3 * scale, vx: Math.cos(a) * sp, vy: 1 + Math.random() * 4, vz: Math.sin(a) * sp, max: 1.4 + Math.random(), s0: 2 * scale, s1: 7 * scale, r: 0.86, g: 0.8, b: 0.7, a: 0.55, drag: 2.2 });
+    }
+    for (let i = 0; i < 14; i++) {
+      this.smoke.spawn({ x: pos.x + (Math.random() - 0.5) * 8 * scale, y: 1 + Math.random() * 3, z: pos.z + (Math.random() - 0.5) * 8 * scale, vx: 0, vy: 4 + Math.random() * 4, vz: 0, max: 2 + Math.random(), s0: 2, s1: 8 * scale, r: 0.97, g: 0.96, b: 0.96, a: 0.45, drag: 0.6 });
+    }
+    this.shockRing(_v.set(pos.x, 0.3, pos.z), 22 * scale, '#fff1d6', 0.6, true);
+  }
+
   /** 刀刃擦地／擦牆的火花 */
   sparks(point, vel, n = 6) {
     for (let i = 0; i < n; i++) {

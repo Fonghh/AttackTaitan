@@ -748,6 +748,24 @@ export class Game {
     this.stats.strikes++;
     const dir = this.pc.speed > 2 ? _v2.copy(this.pc.vel).normalize() : _v2.copy(this.rig.forward);
 
+    // 後翻中或剛翻完 → 迴旋斬（不看速度）：砍最近的巨人；附近沒有巨人就只揮一圈
+    if (this.pc.flip?.back || this.pc.backSlashWindow > 0) {
+      this.pc.backSlashWindow = 0;
+      let best = null, bd = Infinity;
+      for (const t of this.titans) {
+        if (!t.alive) continue;
+        const d = t.napeWorld(_v).distanceTo(this.pc.pos);
+        if (d < bd) (bd = d), (best = t);
+      }
+      this.audio.play('slash');
+      if (best && bd < this.cfg.strike.spinRange * best.scale + 10) this._spinAttack(best, false, true);
+      else {
+        this.model.startSpin();
+        this.fx.spinRing(this.pc.pos);
+        this.audio.play('swing');
+      }
+      return;
+    }
     // 勾在巨人身上、而且離巨人不遠 → 迴旋斬
     const hooked = this._hookedTitan();
     if (hooked && hooked.alive && hooked.napeWorld(_v).distanceTo(this.pc.pos) < this.cfg.strike.spinRange * hooked.scale + 8) {
@@ -769,7 +787,7 @@ export class Game {
       }
     }
 
-    this.model.startSlash();
+    this.model.startSlash(this._slashType());
     this.fx.slash(_v.copy(this.pc.pos).addScaledVector(dir, 1.2), dir, this.model.slashSide, false);
     if (!this.titan.alive) {
       this.audio.play('slash');
@@ -800,6 +818,21 @@ export class Game {
     }
     // 命中：短的切肉聲（和命中音一起是「嚓—砰」）；揮空：完整的「咻」
     this.audio.play(this.hitSerial !== hitsBefore ? 'slashCut' : 'slash');
+  }
+
+  /**
+   * 依接近的方式選斬擊動作：從上方俯衝＝往下劈、從巨人側面掠過＝橫掃、其他＝交叉斬（每次左右交替）
+   */
+  _slashType() {
+    const v = this.pc.vel;
+    const sp = v.length();
+    if (sp > 6 && v.y < -0.45 * sp) return 'down';
+    const t = this.titan;
+    if (t?.alive && sp > 10) {
+      const side = Math.abs(v.x * t.forward.z - v.z * t.forward.x) / sp; // 速度和巨人面向垂直＝從側面掠過
+      if (side > 0.75) return 'side';
+    }
+    return 'cross';
   }
 
   /** 可以發動兵長斬的鋼索（勾住中，優先勾在巨人身上的那條）；沒有則 null */
@@ -897,7 +930,7 @@ export class Game {
   }
 
   /** 迴旋斬：勾在巨人身上時出招，範圍大、不限方向（後頸仍需從側後方） */
-  _spinAttack(titan, ground = false) {
+  _spinAttack(titan, ground = false, fromBackflip = false) {
     const C = this.cfg.strike;
     this.model.startSpin();
     this.fx.spinRing(this.pc.pos);
@@ -912,9 +945,9 @@ export class Game {
     }
     const ev = this._evaluate();
     const range = C.spinRange * titan.scale;
-    const minSp = C.minSpeed * C.spinSpeedFactor;
+    const minSp = fromBackflip ? 0 : C.minSpeed * C.spinSpeedFactor; // 後翻迴旋斬不看速度
     if (ev.dist <= range && ev.speed >= minSp && ev.angleOk) {
-      ev.damage = Math.round(Math.min(C.maxDamage, napeDamageSpin(ev.speed, this.cfg)));
+      ev.damage = Math.round(Math.min(C.maxDamage, napeDamageSpin(Math.max(ev.speed, fromBackflip ? C.minSpeed : 0), this.cfg)));
       this._napeHit(ev, true);
     } else if (!this._partHit(range)) {
       this._bodyHit(range);
@@ -983,6 +1016,7 @@ export class Game {
     this.hitSerial++;
     this.model.slashContact(this.cfg.feel.slashContact);
     titan.reactHit(dir, label.startsWith('眼') ? 'eye' : 'leg');
+    titan.spawnChunks(p, dir, label.startsWith('眼') ? 1 : 2, label.startsWith('眼') ? 0.5 : 0.9); // 斷肢肉塊
     this.fx.burst(p, 1.0, '#ffd0a0', 0.2);
     this.fx.bladeHit(p, dir, false);
     this.fx.napeHit(p, dir, false);
@@ -1081,6 +1115,9 @@ export class Game {
     this.hitStop = 0.2;
     this.slowMo = this.slowMoMax = 1.2;
     this.rig.startKillCam(titan, this.napePos, this.pc);
+    // 後頸噴出肉塊；附近的巨人轉頭看、被激怒
+    titan.spawnChunks(this.napePos, _v.copy(this.pc.vel).normalize(), 3, 1.1);
+    for (const t of this.titans) if (t !== titan && t.alive && t.root.position.distanceTo(titan.root.position) < 90) t.alert(titan.root.position);
     if (!this.pc.levi) this.pc.startFloat(this.cfg.float.kill); // 在蒸氣裡往上飄
     this.fx.shockRing(this.napePos, 16 * titan.scale, '#ffd27a', 0.6);
     this.fx.impactStar(this.napePos, 10, '#fff2c0', 0.32);
@@ -1515,6 +1552,20 @@ export class Game {
     }
   }
 
+  /** 巨人後頸當勾點：在射程內、而且從角色到後頸沒有被建築擋住才算 */
+  _napeAim(t, p, range) {
+    if (!t || !t.alive || !t.nape) return null;
+    const nape = t.napeWorld(new THREE.Vector3());
+    const d = nape.distanceTo(p);
+    if (d > range) return null;
+    const ray = (this._napeRay ||= new THREE.Raycaster());
+    ray.set(p, _v.subVectors(nape, p).multiplyScalar(1 / Math.max(d, 1e-3)));
+    ray.near = 0.5;
+    ray.far = Math.max(0.6, d - 1);
+    if (ray.intersectObjects(this.city.hookables, false).length) return null;
+    return { point: nape, object: t.nape, assisted: true, titan: true, nape: true };
+  }
+
   _updateAims() {
     const H = this.cfg.hook;
     // 準心位置（手機準心搖桿可以把準心移離畫面中央）
@@ -1545,7 +1596,10 @@ export class Game {
         snapped = this.aimer.snapAim(this.camera, this.reticle, p, H.range, this.city.snapAnchors, R.snapRadiusPx, innerWidth, innerHeight);
       }
       // 準心附近有巨人（且沒被建築擋住）→ 優先勾巨人
-      const titanAim = this.aimer.aimTitan(this.camera, f, p, H.range, this.touch ? H.titanAssistDegTouch : H.titanAssistDeg, this.titanRoots);
+      let titanAim = this.aimer.aimTitan(this.camera, f, p, H.range, this.touch ? H.titanAssistDegTouch : H.titanAssistDeg, this.titanRoots);
+      // 勾巨人一律勾在後頸（不管射線打到腰還是胸口）；目標鎖定中，只要看得到就直接勾鎖定巨人的後頸
+      if (this.targetLock?.alive) titanAim = this._napeAim(this.targetLock, p, H.range) || titanAim;
+      if (titanAim && !titanAim.nape) titanAim = this._napeAim(titanAim.object.userData.titan, p, H.range) || titanAim;
       const a = (this.aims.auto = titanAim || snapped || aimAt(0));
       if (a) {
         // 勾點在左邊就用左發射器，右邊用右發射器
@@ -1554,7 +1608,11 @@ export class Game {
       }
     } else {
       this.aims.auto = null;
-      const tAim = (yawOff) => this.aimer.aimTitan(this.camera, _v2.copy(f).applyAxisAngle(_up, (yawOff * Math.PI) / 180), p, H.range, this.touch ? H.titanAssistDegTouch : H.titanAssistDeg, this.titanRoots);
+      const tAim0 = (yawOff) => this.aimer.aimTitan(this.camera, _v2.copy(f).applyAxisAngle(_up, (yawOff * Math.PI) / 180), p, H.range, this.touch ? H.titanAssistDegTouch : H.titanAssistDeg, this.titanRoots);
+      const tAim = (yawOff) => {
+        const r = tAim0(yawOff);
+        return r ? this._napeAim(r.object.userData.titan, p, H.range) || r : null;
+      };
       this.aims.left = tAim(H.aimOffsetDeg) || aimAt(H.aimOffsetDeg);
       this.aims.right = tAim(-H.aimOffsetDeg) || aimAt(-H.aimOffsetDeg);
     }
@@ -1582,6 +1640,7 @@ export class Game {
         break;
       case 'land':
         this.audio.play('land', { speed: e.speed });
+        this.model.land(e.speed, e.airTime || 0, !!e.slide);
         if (e.speed > 6 || e.airTime > 0.6) this.fx.dust(this.pc.pos, this.pc.vel, e.slide ? 14 : 6);
         if (e.slide) this.rig.addShake(Math.min(this.cfg.feel.shake.move, e.speed / 300));
         break;
@@ -1602,6 +1661,13 @@ export class Game {
         this.audio.play('hover');
         this.fx.gasBurst(this.pc.pos, _v.copy(this.pc.vel).normalize(), true);
         this.rig.addShake(this.cfg.feel.shake.move * 0.8);
+        break;
+      case 'backflip': // 後翻：往後上方翻一圈
+        this._missionEvent('flip');
+        this.audio.play('swing');
+        this.audio.play('boost', { vol: 0.6 });
+        this.fx.gasBurst(this.pc.pos, _v.copy(this.rig.forward).setY(-0.6).normalize(), true);
+        this.rig.addShake(this.cfg.feel.shake.move);
         break;
       case 'flip': // 捲身翻轉開始
         this._missionEvent('flip');
@@ -1658,6 +1724,7 @@ export class Game {
       case 'hurt':
         this.stats.hurt = true;
         this.audio.play('hurt');
+        this.model.hurt();
         this.hud.hurt();
         this.rig.addShake(this.cfg.feel.shake.hurt);
         if (this.pc.hp <= 0) {
@@ -1740,6 +1807,15 @@ export class Game {
         break;
       case 'steamHit':
         if (!this.grab) this.pc.damage(this.cfg.titan.steam.damage, this.pc.vel.clone()); // 被蒸氣吹開（推力在巨人那邊已經加上）
+        break;
+      case 'bodySlam': // 死亡撲倒落地
+        this.fx.bodySlam(e.pos, titan.scale);
+        if (d < 90) this.rig.addShake(this.cfg.feel.shake.part * (1 - d / 90));
+        this.audio.play('land', { speed: 45 });
+        break;
+      case 'chunkLand':
+        this.fx.dust(e.pos, _v.set(0, 0, 0), 6);
+        this.fx.steam(e.pos, 2);
         break;
       case 'pounceLand':
         if (d < 70) this.rig.addShake(0.5 * (1 - d / 70));

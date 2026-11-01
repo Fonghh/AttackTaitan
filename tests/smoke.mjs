@@ -772,6 +772,23 @@ try {
     g.lockPress = performance.now() - 1000; // 模擬長按
     g._handleEvent('lockUp');
     cam.target.cleared = !g.targetLock;
+    // 勾巨人一律吸到後頸：準心對著木人的肚子，勾點仍是後頸
+    {
+      const belly = dummy.spheres[1].center.clone();
+      g.pc.releaseAll();
+      g.pc.pos.set(belly.x + 2, belly.y, belly.z + 30);
+      g.pc.vel.set(0, 0, 0);
+      g.rig.yaw = Math.atan2(-(belly.x - g.pc.pos.x), -(belly.z - g.pc.pos.z));
+      g.rig.pitch = 0;
+      g.step(1 / 60, base());
+      g.rig.yaw = Math.atan2(-(belly.x - g.pc.pos.x), -(belly.z - g.pc.pos.z));
+      g.rig.pitch = Math.atan2(belly.y - g.camera.position.y, Math.hypot(belly.x - g.camera.position.x, belly.z - g.camera.position.z));
+      g.rig.update(0.0001, g.pc, { touch: false, joyX: 0, realDt: 0.0001 });
+      g.camera.updateMatrixWorld();
+      g._updateAims();
+      const a = g.aims.auto;
+      cam.napeSnap = { nape: !!a?.nape, dist: a ? +a.point.distanceTo(dummy.napeWorld(new V())).toFixed(2) : null };
+    }
     g.camMode = 'follow';
     g.cameraFollow = true;
     const texts = [g.hud.el.mission.textContent];
@@ -785,6 +802,7 @@ try {
   check('[camera] fixed view: orbiting and flying never turn or bank the camera', training.cam.fixed.dyaw < 1e-3 && training.cam.fixed.dpitch < 1e-3 && Math.abs(training.cam.fixed.roll) < 0.01 && !training.cam.fixed.locked, JSON.stringify(training.cam.fixed));
   check('[camera] behind view: camera stays behind the character while orbiting and flying', training.cam.behind.turned > 0.5 && training.cam.behind.maxDiff < 0.35 && training.cam.behind.flyDiff < 0.2 && training.cam.behind.touchDiff < 0.35, JSON.stringify(training.cam.behind));
   check('[camera] target lock: tap locks and cycles, long press clears; camera locks and pulls back; nape marker shown', !!training.cam.target.first && training.cam.target.locked && training.cam.target.wide > 0.8 && training.cam.target.mark && training.cam.target.second && training.cam.target.second !== training.cam.target.first && training.cam.target.cleared, JSON.stringify(training.cam.target));
+  check('[aim] hooking a titan always anchors at its nape (even when aiming at the belly)', training.cam.napeSnap.nape && training.cam.napeSnap.dist < 0.5, JSON.stringify(training.cam.napeSnap));
   check('[training] finishing all 6 steps completes the level, shows stars and unlocks the next level', training.state === 'won' && /★/.test(training.stars || '') && training.next, JSON.stringify(training));
   const rings = await levelRun('rings', () => {
     const g = window.__game;

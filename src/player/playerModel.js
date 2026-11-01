@@ -9,6 +9,9 @@ const _pq = new THREE.Quaternion();
 const _bd = new THREE.Vector3();
 const _NEG_Z = new THREE.Vector3(0, 0, -1);
 const _up = new THREE.Vector3(0, 1, 0);
+const _X = new THREE.Vector3(1, 0, 0);
+const _hurtAxis = new THREE.Vector3(1, 0, 0.35).normalize();
+const _qIdent = new THREE.Quaternion();
 
 function mesh(geo, mat, x = 0, y = 0, z = 0) {
   const m = new THREE.Mesh(geo, mat);
@@ -360,9 +363,26 @@ export class PlayerModel {
     return (side === 'left' ? this.launcherL : this.launcherR).getWorldPosition(out);
   }
 
-  startSlash() {
+  /**
+   * 斬擊。type：'cross' 雙刀由上往下交叉（預設）、'down' 從頭頂往下劈（從上方俯衝時）、
+   * 'side' 雙刀橫掃（從側面掠過時）
+   */
+  startSlash(type = 'cross') {
     this.slashTimer = 0.28;
     this.slashSide *= -1;
+    this.slashType = type;
+  }
+
+  /** 落地：speed＝落地速度，airTime＝滯空秒數。高速＝前滾翻、中速＝蹲低緩衝、低速＝直接站 */
+  land(speed, airTime, sliding) {
+    if (sliding) return;
+    if (speed > 22 || airTime > 1.6) this.landAnim = { kind: 'roll', t: 0, dur: 0.5 };
+    else if (speed > 9 || airTime > 0.7) this.landAnim = { kind: 'crouch', t: 0, dur: 0.35 };
+  }
+
+  /** 被打飛：翻滾 0.6 秒、手腳亂甩 */
+  hurt() {
+    this.hurtTimer = 0.6;
   }
 
   /** 命中：揮刀直接跳到刀刃劃過的進度 k（不換邊），頓點停在「砍到了」那一格 */
@@ -457,6 +477,36 @@ export class PlayerModel {
       this._spinQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), k * Math.PI * 4);
       this.body.quaternion.premultiply(this._spinQ);
     }
+    const backflip = pc.flip?.phase === 'back';
+    if (backflip) {
+      // 後翻：往後翻一圈（頭往後、腳往上）
+      const k = 1 - Math.max(0, pc.flip.t) / pc.flip.time;
+      const e = k < 0.5 ? 2 * k * k : 1 - 2 * (1 - k) * (1 - k);
+      this._spinQ.setFromAxisAngle(_X, e * Math.PI * 2);
+      this.body.quaternion.copy(this.lean).premultiply(this._spinQ);
+    }
+    // 沿著巨人背後往上衝：身體直立、貼著巨人
+    const climbing = !!(airborne && pc.dashing && pc.ropeHook?.object?.userData?.titan && v.y > speed * 0.55 && speed > 8);
+    this.climbBlend = (this.climbBlend || 0) + ((climbing ? 1 : 0) - (this.climbBlend || 0)) * Math.min(1, dt * 8);
+    if (this.climbBlend > 0.01) this.body.quaternion.slerp(_qIdent, this.climbBlend * 0.85);
+    // 落地動畫
+    const la = this.landAnim;
+    if (la) {
+      la.t += dt;
+      if (la.t >= la.dur) this.landAnim = null;
+      else if (la.kind === 'roll') {
+        const k = la.t / la.dur;
+        this._spinQ.setFromAxisAngle(_X, -k * Math.PI * 2);
+        this.body.quaternion.premultiply(this._spinQ);
+      }
+    }
+    // 被打飛：翻滾
+    if (this.hurtTimer > 0) {
+      this.hurtTimer -= dt;
+      const k = 1 - Math.max(0, this.hurtTimer) / 0.6;
+      this._spinQ.setFromAxisAngle(_hurtAxis, (1 - (1 - k) * (1 - k)) * Math.PI * 3);
+      this.body.quaternion.premultiply(this._spinQ);
+    }
 
     // 姿勢
     const L = this.legL, R = this.legR;
@@ -491,12 +541,30 @@ export class PlayerModel {
       this.hips.position.y = 0.6;
       this.armL.shoulder.rotation.x = -0.6;
       this.armR.shoulder.rotation.x = -0.6;
-    } else if (airborne && pc.flip?.phase === 'tuck') {
+    } else if ((airborne && (pc.flip?.phase === 'tuck' || backflip)) || this.landAnim?.kind === 'roll') {
       // 捲身：膝蓋抱到胸前、手臂收起
       L.hip.rotation.x = R.hip.rotation.x = 1.9;
       L.knee.rotation.x = R.knee.rotation.x = -2.3;
       this.hips.position.y = 0.95;
       this.armL.shoulder.rotation.x = this.armR.shoulder.rotation.x = 0.9;
+    } else if (this.climbBlend > 0.5) {
+      // 沿背上升：雙腿併攏微彎、雙刀往後下收、頭往上看
+      L.hip.rotation.x = 0.25;
+      R.hip.rotation.x = 0.1;
+      L.knee.rotation.x = -0.5;
+      R.knee.rotation.x = -0.3;
+      this.hips.position.y = 0.95;
+      this.armL.shoulder.rotation.x = this.armR.shoulder.rotation.x = 0.7;
+      this.head.rotation.x = 0.45;
+    } else if (this.hurtTimer > 0) {
+      // 被打飛：手腳亂甩
+      const w = Math.sin(t * 30);
+      L.hip.rotation.x = 0.8 + w * 0.5;
+      R.hip.rotation.x = 0.3 - w * 0.5;
+      L.knee.rotation.x = R.knee.rotation.x = -0.9;
+      this.hips.position.y = 0.95;
+      this.armL.shoulder.rotation.x = -2.2 + w * 0.6;
+      this.armR.shoulder.rotation.x = -1.4 - w * 0.6;
     } else if (airborne && (pc.dashing || pc.levi || pc.flip)) {
       // 衝刺：縮身前衝，雙刀往後拖
       L.hip.rotation.x = 1.05;
@@ -521,6 +589,15 @@ export class PlayerModel {
       L.knee.rotation.x = R.knee.rotation.x = 0;
       this.armL.shoulder.rotation.x = this.armR.shoulder.rotation.x = Math.sin(t * 2) * 0.03;
       this.hips.position.y = 0.95;
+    }
+    // 蹲低落地緩衝：膝蓋彎下、腰下沉，之後彈回
+    if (this.landAnim?.kind === 'crouch' && !running) {
+      const k = this.landAnim.t / this.landAnim.dur;
+      const c = Math.sin(Math.min(1, k * 1.3) * Math.PI); // 先蹲下再站起
+      L.hip.rotation.x = R.hip.rotation.x = 1.0 * c;
+      L.knee.rotation.x = R.knee.rotation.x = -1.6 * c;
+      this.hips.position.y = 0.95 - 0.35 * c;
+      this.hips.rotation.x = -0.35 * c;
     }
     // 手臂張開：飛越快張越開
     const spread = airborne ? 0.25 + Math.max(0, Math.min(1, (speed - 10) / 35)) * 0.55 : 0.25;
@@ -559,12 +636,29 @@ export class PlayerModel {
     if (this.slashTimer > 0) {
       this.slashTimer -= dt;
       const k = 1 - Math.max(0, this.slashTimer) / 0.28;
-      const swing = -2.6 + k * 4.2;
-      this.armL.shoulder.rotation.x = swing;
-      this.armR.shoulder.rotation.x = swing;
-      this.armL.shoulder.rotation.z = -0.25 - Math.sin(k * Math.PI) * 0.8 * this.slashSide;
-      this.armR.shoulder.rotation.z = 0.25 - Math.sin(k * Math.PI) * 0.8 * this.slashSide;
-      this.armL.fore.rotation.x = this.armR.fore.rotation.x = -0.2;
+      if (this.slashType === 'down') {
+        // 從頭頂往下劈：雙手高舉到頭後，再一起劈到身前下方，上身跟著往前壓
+        const swing = -3.1 + k * 4.3;
+        this.armL.shoulder.rotation.set(swing, 0, -0.15);
+        this.armR.shoulder.rotation.set(swing, 0, 0.15);
+        this.armL.fore.rotation.x = this.armR.fore.rotation.x = -0.1;
+        this.hips.rotation.x -= Math.sin(k * Math.PI) * 0.5;
+      } else if (this.slashType === 'side') {
+        // 雙刀橫掃：手臂往前平舉，從一側掃到另一側，腰跟著扭
+        const sweep = (k - 0.5) * 3.2 * this.slashSide;
+        this.armL.shoulder.rotation.set(-1.45, 0, -0.4 + sweep);
+        this.armR.shoulder.rotation.set(-1.45, 0, 0.4 + sweep);
+        this.armL.fore.rotation.x = this.armR.fore.rotation.x = -0.05;
+        this._spinQ.setFromAxisAngle(_up, -sweep * 0.35);
+        this.body.quaternion.multiply(this._spinQ);
+      } else {
+        const swing = -2.6 + k * 4.2;
+        this.armL.shoulder.rotation.x = swing;
+        this.armR.shoulder.rotation.x = swing;
+        this.armL.shoulder.rotation.z = -0.25 - Math.sin(k * Math.PI) * 0.8 * this.slashSide;
+        this.armR.shoulder.rotation.z = 0.25 - Math.sin(k * Math.PI) * 0.8 * this.slashSide;
+        this.armL.fore.rotation.x = this.armR.fore.rotation.x = -0.2;
+      }
     }
 
     // 刀的方向：刀身與身體垂直（往兩側伸出、刀尖略朝外下、略往後），跟著身體傾斜；

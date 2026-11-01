@@ -51,6 +51,7 @@ export class PlayerController {
     this.hangArmTimer = 0;
     this.hangTimer = 0;
     this.floatTimer = 0; // 斬擊後浮空剩餘秒數
+    this.backSlashWindow = 0; // 後翻後還能接迴旋斬的剩餘秒數
     this.hovering = false; // 懸停中（勾在巨人旁邊）
     this.hoverUsed = 0; // 這次勾住已懸停的秒數
     this.thrust = new Vector3(); // 噴氣推力方向×強度（特效用：噴流往反方向噴）
@@ -308,6 +309,7 @@ export class PlayerController {
 
     // 滯空計時
     if (this.hangTimer > 0) this.hangTimer -= dt;
+    if (this.backSlashWindow > 0) this.backSlashWindow -= dt;
     if (this.floatTimer > 0) {
       this.floatTimer -= dt;
       if (this.grounded || intent.boostPressed) this.floatTimer = 0;
@@ -328,7 +330,9 @@ export class PlayerController {
     if (intent.boostPressed && !this.grounded) {
       const F = cfg.dash.flip;
       if (this.clock - this.lastBoostPress < F.window && !this.busy && this.flipCool <= 0 && this.gas >= F.gas) {
-        this._startFlip(world, intent);
+        // 搖桿往後拉＝後翻；其他方向＝原本的翻轉衝刺
+        if (intent.move.y < -0.5) this._startBackflip();
+        else this._startFlip(world, intent);
         this.lastBoostPress = -9;
       } else this.lastBoostPress = this.clock;
     }
@@ -336,7 +340,19 @@ export class PlayerController {
       const F = cfg.dash.flip;
       const fl = this.flip;
       fl.t -= dt;
-      if (fl.phase === 'tuck') {
+      if (fl.phase === 'back') {
+        // 後翻：照拋物線飛（低重力、空氣阻力），翻完接短暫滯空
+        const B = cfg.dash.backflip;
+        this.vel.y -= cfg.gravity * B.gravity * dt;
+        this.vel.x *= Math.exp(-1.2 * dt);
+        this.vel.z *= Math.exp(-1.2 * dt);
+        if (fl.t <= 0) {
+          this.flip = null;
+          this.hangTimer = B.hang;
+          this.backSlashWindow = B.slashWindow;
+          this.emit('backflipEnd', {});
+        }
+      } else if (fl.phase === 'tuck') {
         // 捲身翻轉：空中幾乎停住、縮身翻一圈
         this.vel.multiplyScalar(Math.exp(-8 * dt));
         if (fl.t <= 0) {
@@ -429,6 +445,7 @@ export class PlayerController {
     if (hovering) this.thrust.y += 0.55; // 懸停：往下噴撐住
     if (airThrust) this.thrust.y += 0.9;
     if (this.flip && this.flip.phase === 'burst' && this.vel.lengthSq() > 1) this.thrust.copy(this.vel).normalize().multiplyScalar(1.4);
+    if (this.flip?.phase === 'back' && this.flip.t > this.flip.time * 0.4) this.thrust.set(-_fwd.x, 1.1, -_fwd.z); // 後翻：往前下方噴
 
     const wasGrounded = this.grounded;
     const n = substepCount(this.speed + 10, dt);
@@ -667,6 +684,56 @@ export class PlayerController {
     this.emit('flip', {});
   }
 
+  /**
+   * 衝向後頸時繞開巨人的身體：直線路徑如果會穿過胸口、肚子或頭（碰撞球＋邊距），
+   * 就把速度往「路徑最接近球心那點、遠離球心」的方向推；人在巨人前面時再偏向背後。
+   * 結果是從身體旁邊滑過去、繞到背後再上到後頸，不會卡在腰間。
+   */
+  _avoidTitanBody(titan, h) {
+    const TD = this.cfg.dash.titanDash;
+    const hk = this.ropeHook;
+    if (!hk) return;
+    const A = hk.anchor(_v1);
+    _tmp.subVectors(A, this.pos);
+    const L2 = _tmp.lengthSq();
+    if (L2 < 1) return;
+    const inFront = titan.forward && (this.pos.x - titan.root.position.x) * titan.forward.x + (this.pos.z - titan.root.position.z) * titan.forward.z > 0;
+    for (const i of [1, 2, 3]) {
+      const sp = titan.spheres[i];
+      if (!sp || sp.r <= 0) continue;
+      const r = sp.r + TD.avoidMargin;
+      const t = Math.max(0, Math.min(1, _hv.subVectors(sp.center, this.pos).dot(_tmp) / L2));
+      if (t > 0.92) continue; // 已經快到後頸了
+      _hv.copy(this.pos).addScaledVector(_tmp, t).sub(sp.center); // 路徑最近點 − 球心
+      const d = _hv.length();
+      if (d >= r) continue;
+      if (d < 1e-3) _hv.set(0, 1, 0);
+      _hv.normalize();
+      if (inFront) _hv.addScaledVector(titan.forward, -0.6).normalize(); // 往背後繞
+      this.vel.addScaledVector(_hv, TD.avoidAccel * (1 - d / r) * h);
+    }
+  }
+
+  /** 後翻：鋼索放鬆，往鏡頭反方向＋上方翻一圈 */
+  _startBackflip() {
+    const B = this.cfg.dash.backflip;
+    for (const side of ['left', 'right']) {
+      const hk = this.hooks[side];
+      if (!hk.attached) continue;
+      const d = this.pos.distanceTo(hk.anchor(_anchor));
+      hk.slack = true;
+      hk.length = d + 40;
+      hk.slackPeak = hk.slackStart = d;
+      hk.pullOn = false;
+    }
+    this.vel.set(-_fwd.x * B.back, B.up, -_fwd.z * B.back);
+    this.grounded = false;
+    this.flip = { phase: 'back', t: B.time, time: B.time, back: true };
+    this.flipCool = this.cfg.dash.flip.cooldown;
+    this.gas = Math.max(0, this.gas - B.gas);
+    this.emit('backflip', {});
+  }
+
   /** 兵長斬：開始空中短拍（之後自動沿鋼索直衝） */
   startLevi(side) {
     if (!this.hooks[side].attached || this.busy) return false;
@@ -829,9 +896,13 @@ export class PlayerController {
           // 實際把繩子收短（鋼索約束每步最多修正 maxCorrection，不會瞬移）
           hk.length = Math.max(H.minLength, Math.min(hk.length, dist) - reel * h);
           if (along < reel) this.vel.addScaledVector(_anchor, Math.min(D.radialAccel * Math.max(0.4, this.dashScale) * r * h, reel - along));
+          // 勾在巨人身上（後頸）：一律直衝，不用按前；路線繞開巨人的身體
+          const titan = hk.object?.userData?.titan;
+          if (titan?.spheres) this._avoidTitanBody(titan, h);
+          const straight = titan ? 1 : this.ropeFwd;
           if (hk.prevDist && dist < hk.prevDist) {
             // 往前推＋衝刺＝直衝目標（不放大擺盪）；不推＝擺盪式衝刺
-            const k = (Math.min(D.spinUpMax, hk.prevDist / dist) - 1) * r * (1 - this.ropeFwd);
+            const k = (Math.min(D.spinUpMax, hk.prevDist / dist) - 1) * r * (1 - straight);
             _tmp.copy(this.vel).addScaledVector(_anchor, -this.vel.dot(_anchor));
             this.vel.addScaledVector(_tmp, k);
           }
