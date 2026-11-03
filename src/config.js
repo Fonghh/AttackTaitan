@@ -298,6 +298,7 @@ export const CONFIG = {
       knock: 20,
       cooldown: 3.4,
     },
+    siegeDamage: 2.2, // 據點防衛：巨人砸一下城牆扣多少耐久（× 體型）
     // 鎧甲巨人：後頸有水晶鎧甲，要先砍碎（每砍一下扣一片）才傷得到；鎧甲還在時傷害只剩一成五
     armored: { plates: 2, damageScale: 0.15, walkFactor: 0.75 },
     // 蒸氣巨人：每隔一段時間全身發熱 → 噴出蒸氣，把附近的人吹開並燙傷；噴完有空檔

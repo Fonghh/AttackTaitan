@@ -7,13 +7,14 @@ const memStorage = () => {
   return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)) };
 };
 
-test('levels: 6 levels in order, each with 3 star rules', () => {
-  assert.deepEqual(LEVELS.map((l) => l.id), ['controls', 'training', 'city', 'rings', 'forest', 'variety']);
+test('levels: 7 levels in order, each with 3 star rules', () => {
+  assert.deepEqual(LEVELS.map((l) => l.id), ['controls', 'training', 'city', 'forest', 'variety', 'fort', 'harbor']);
   for (const l of LEVELS) assert.equal(l.stars.length, 3, l.id);
   assert.equal(nextLevel('controls').id, 'training');
   assert.equal(nextLevel('training').id, 'city');
   assert.equal(nextLevel('forest').id, 'variety');
-  assert.equal(nextLevel('variety'), null);
+  assert.equal(nextLevel('variety').id, 'fort');
+  assert.equal(nextLevel('harbor'), null);
   assert.equal(getLevel('nope'), null);
 });
 
@@ -22,8 +23,8 @@ test('levels: star rating by clear / time / no damage', () => {
   assert.deepEqual(evaluateStars(city, { won: true, time: 200, hurt: false }), [true, true, true]);
   assert.deepEqual(evaluateStars(city, { won: true, time: 400, hurt: true }), [true, false, false]);
   assert.deepEqual(evaluateStars(city, { won: false, time: 10, hurt: false }), [false, false, false]);
-  const rings = getLevel('rings');
-  assert.deepEqual(evaluateStars(rings, { won: true, time: 100, hurt: true }), [true, true, false]);
+  const fort = getLevel('fort');
+  assert.deepEqual(evaluateStars(fort, { won: true, time: 300, hurt: true }), [true, true, false]);
 });
 
 test('levels: progress keeps the best result and unlocks the next level', () => {

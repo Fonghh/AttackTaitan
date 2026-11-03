@@ -44,7 +44,7 @@ try {
   const menu = await page.evaluate(() => {
     return [...document.querySelectorAll('#level-list .level-card')].map((b) => ({ name: b.querySelector('b').textContent, locked: b.disabled }));
   });
-  check('[levels] menu lists 6 levels (controls tutorial first), all unlocked', menu.length === 6 && menu[0].name === '操作教學' && menu.every((m) => !m.locked), JSON.stringify(menu));
+  check('[levels] menu lists 7 levels (controls tutorial first), all unlocked', menu.length === 7 && menu[0].name === '操作教學' && menu.every((m) => !m.locked), JSON.stringify(menu));
   await page.goto(`${URL_BASE}?level=city`);
   await page.waitForFunction(() => window.__game, null, { timeout: 20000 });
   await page.waitForTimeout(800);
@@ -804,31 +804,48 @@ try {
   check('[camera] target lock: tap locks and cycles, long press clears; camera locks and pulls back; nape marker shown', !!training.cam.target.first && training.cam.target.locked && training.cam.target.wide > 0.8 && training.cam.target.mark && training.cam.target.second && training.cam.target.second !== training.cam.target.first && training.cam.target.cleared, JSON.stringify(training.cam.target));
   check('[aim] hooking a titan always anchors at its nape (even when aiming at the belly)', training.cam.napeSnap.nape && training.cam.napeSnap.dist < 0.5, JSON.stringify(training.cam.napeSnap));
   check('[training] finishing all 6 steps completes the level, shows stars and unlocks the next level', training.state === 'won' && /★/.test(training.stars || '') && training.next, JSON.stringify(training));
-  const rings = await levelRun('rings', () => {
+  const fort = await levelRun('fort', () => {
     const g = window.__game;
     g.renderer.setAnimationLoop(null);
     const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
-    // 光圈不能和建築重疊（含半徑）
-    const R = g.mission.ringRadius;
-    let worst = 1e9;
-    for (const r of g.mission.rings) {
-      for (const c of g.city.colliders) {
-        const dx = Math.max(c.min.x - r.x, 0, r.x - c.max.x), dy = Math.max(c.min.y - r.y, 0, r.y - c.max.y), dz = Math.max(c.min.z - r.z, 0, r.z - c.max.z);
-        worst = Math.min(worst, Math.hypot(dx, dy, dz) - R);
-      }
-    }
-    const marker = !document.getElementById('wp-marker').hidden || !document.getElementById('wp-arrow').hidden;
-    // 依序把玩家放到每個光圈中心
-    for (const r of g.mission.rings) {
-      g.pc.pos.copy(r);
-      g.pc.vel.set(0, 0, 0);
-      g.step(1 / 60, base());
-    }
-    for (let i = 0; i < 60; i++) g.step(1 / 60, base());
-    return { clearance: +worst.toFixed(1), marker, passed: g.mission.ringIndex, total: g.mission.rings.length, state: g.state, noTitans: document.body.classList.contains('no-titans') };
+    const out = { total: g.titans.length, active0: g.titans.filter((t) => t.alive).length, dormantHidden: g.titans.filter((t) => t.state === 'dormant').every((t) => !t.root.visible), text0: g.hud.el.mission.textContent };
+    // 巨人會直直走向要塞：第一波其中一隻放到城牆外，走過去砸城牆
+    const t0 = g.titans[0];
+    const startD = Math.hypot(t0.root.position.x, t0.root.position.z);
+    g.pc.pos.set(0, 58, 0);
+    for (let i = 0; i < 120; i++) g.step(1 / 60, base());
+    out.walked = +(startD - Math.hypot(t0.root.position.x, t0.root.position.z)).toFixed(1);
+    t0.root.position.set(0, 0, 60);
+    t0.attackCooldown = 0;
+    for (let i = 0; i < 60 * 6 && g.baseHp >= 100; i++) g.step(1 / 60, base());
+    out.baseHp = +g.baseHp.toFixed(1);
+    // 第一波全倒 → 第二波出現
+    for (const t of g.titans) if ((t.spawn.wave ?? 0) === 0) t.takeHit(999, true);
+    for (let i = 0; i < 60 * 5; i++) g.step(1 / 60, base());
+    out.wave2 = g.titans.filter((t) => (t.spawn.wave ?? 0) === 1).every((t) => t.alive && t.root.visible);
+    out.text1 = g.hud.el.mission.textContent;
+    out.state = g.state;
+    return out;
   });
-  check('[rings] 12 rings, none overlapping buildings', rings.total === 12 && rings.clearance > 0.5, JSON.stringify(rings));
-  check('[rings] passing every ring in order finishes the course', rings.passed === 12 && rings.state === 'won' && rings.noTitans, JSON.stringify(rings));
+  check('[fort] 3 waves of titans: only wave 1 active at start, later waves hidden', fort.total === 10 && fort.active0 === 3 && fort.dormantHidden && /第 1\/3 波/.test(fort.text0), JSON.stringify(fort));
+  check('[fort] titans march to the fortress and hammer the walls (fortress HP drops)', fort.walked > 3 && fort.baseHp < 100, JSON.stringify(fort));
+  check('[fort] clearing a wave brings in the next one', fort.wave2 && /第 2\/3 波/.test(fort.text1) && fort.state === 'playing', JSON.stringify(fort));
+  const harbor = await levelRun('harbor', () => {
+    const g = window.__game;
+    g.renderer.setAnimationLoop(null);
+    const base = () => ({ move: { x: 0, y: 0 }, boost: false, boostPressed: false, jump: false, jumpHeld: false, reel: 0, reelStrong: false, lookDX: 0, lookDY: 0, manualLook: false, events: [] });
+    // 掉到海面上：站在海面（不會沉到海底），高速貼著海面飛會濺水花
+    g.pc.releaseAll();
+    g.pc.pos.set(100, 20, 100);
+    g.pc.vel.set(0, -10, 0);
+    for (let i = 0; i < 120; i++) g.step(1 / 60, base());
+    const y = g.pc.pos.y;
+    g.pc.vel.set(30, 0, 0);
+    for (let i = 0; i < 10; i++) g.step(1 / 60, base());
+    const titansInSea = g.titans.filter((t) => t.root.position.x > 20).length;
+    return { y: +y.toFixed(2), waterY: g.city.waterY, titans: g.titans.length, titansInSea, aimTitans: g.titans.every((t) => t.alive) };
+  });
+  check('[harbor] the sea surface holds the player up; titans wade in the sea', harbor.waterY === 5 && harbor.y > 5 && harbor.y < 7 && harbor.titans === 5 && harbor.titansInSea >= 3, JSON.stringify(harbor));
   const forest = await levelRun('forest', () => {
     const g = window.__game;
     g.renderer.setAnimationLoop(null);

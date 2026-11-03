@@ -1,4 +1,6 @@
 // 遊戲主控：建立各模組、處理輸入事件、主迴圈、戰鬥流程與遊戲狀態。
+import { buildAtmosphere } from '../world/atmosphere.js';
+import { mulberry32 } from '../world/textures.js';
 import { toonifyScene } from '../fx/toon.js';
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
@@ -19,6 +21,8 @@ import { Hud } from '../ui/hud.js';
 import { Effects } from '../fx/effects.js';
 import { Audio } from '../audio/audio.js';
 
+// 各地圖空氣中的漂浮物：森林＝黃綠色的光點、草原＝白色花絮、港口＝亮晶晶的水氣、其他＝淡淡的灰塵
+const L_AMBIENT = { forest: 'forest', fort: 'pollen', harbor: 'sea' };
 const SHAKE_LEVELS = { full: 1, half: 0.5, off: 0 }; // 暫停選單「畫面晃動與閃光」
 
 const _v = new THREE.Vector3();
@@ -87,6 +91,9 @@ export class Game {
     document.body.classList.toggle('toon', cfg.style === 'toon');
     this.city = buildCity(this.scene, cfg.world, L.spawn, this.touch, L.map, clearings, cfg.style);
     if (cfg.style === 'toon') toonifyScene(this.scene); // 城市換成分階明暗的卡通材質
+    // 氛圍：草叢、太陽光暈、斜射光束；地圖專屬的空氣漂浮物與暗角色調
+    this.atmo = buildAtmosphere(this.scene, { layout: L.map, toon: cfg.style === 'toon', sunDir: new THREE.Vector3(90, 120, 70), colliders: this.city.colliders, radius: cfg.world.wallRadius, lowSpec: this.touch, rnd: mulberry32(5) });
+    document.body.dataset.map = L.map;
     this.pc = new PlayerController(cfg);
     this.model = new PlayerModel(this.scene, cfg);
     // 刀身與裝置的金屬反光：用簡單的室內環境當反射來源（只套在角色的金屬上）
@@ -403,7 +410,7 @@ export class Game {
     this.showPanel(null);
     this.touchUI.show(this.touch);
     this._save('lastLevel', this.level.id);
-    const hint = { tutorial: '照畫面上方的提示操作，閃爍的按鈕就是現在要用的', training: '照畫面上方的提示一步一步練習', rings: '跟著黃色圓圈與箭頭，依序穿過光圈！', kill: '從高處躍下，用鋼索擺盪接近巨人！' };
+    const hint = { tutorial: '照畫面上方的提示操作，閃爍的按鈕就是現在要用的', training: '照畫面上方的提示一步一步練習', rings: '跟著黃色圓圈與箭頭，依序穿過光圈！', defense: '巨人會直直走向要塞——擋在它們前面，勾後頸一直砍！', kill: '從高處躍下，用鋼索擺盪接近巨人！' };
     this.hud.toast(hint[this.level.objective === 'kill' ? 'kill' : this.level.objective], '', 2.5);
   }
 
@@ -434,6 +441,10 @@ export class Game {
     this.grab = null;
     for (const t of this.titans) t.reset();
     this.titan = this.titans[0] || NO_TITAN;
+    this.baseHp = this.level.base?.hp ?? 100; // 據點防衛：要塞耐久
+    this.mission.baseHp = this.baseHp;
+    this.baseWarned = false;
+    this.waveDelay = 2.5;
     this._setTargetLock(null);
     this.mission.reset();
     this.rig.reset(this.spawnYaw);
@@ -678,6 +689,39 @@ export class Game {
   }
 
   /** 選擇目標巨人：勾住的優先，否則選後頸離玩家最近的（有一點黏性，避免一直切換） */
+  /** 據點防衛：這一波全倒＝下一波從地圖邊緣出現 */
+  _updateDefense() {
+    const cur = this.mission.waveInfo(this.titans).cur;
+    const wave = this.titans.filter((t) => (t.spawn.wave ?? 0) === cur);
+    if (wave.some((t) => t.alive)) return;
+    const next = this.titans.filter((t) => (t.spawn.wave ?? 0) === cur + 1);
+    if (!next.length) return;
+    this.waveDelay = (this.waveDelay ?? 2.5) - this.realDt;
+    if (this.waveDelay > 0) return;
+    this.waveDelay = 2.5;
+    for (const t of next) t.activate();
+    this._updateMission();
+    const big = next.some((t) => t.scale >= 3);
+    this.hud.toast(big ? `⚠ 第 ${cur + 2} 波：超大型巨人出現了！` : `⚠ 第 ${cur + 2} 波巨人來襲！`, 'warn big', 2.4);
+    this.audio.play('windup');
+    this.rig.addShake(this.cfg.feel.shake.part);
+  }
+
+  /** 港口：貼著海面高速飛＝濺起水花；掉進海裡＝大水花 */
+  _updateWater(dt) {
+    const pc = this.pc;
+    const wy = this.city.waterY;
+    if (pc.pos.x < 20) return;
+    const h = pc.pos.y - wy;
+    if (h < 2.2 && pc.speed > 10) this.fx.splash(_v.set(pc.pos.x, wy + 0.2, pc.pos.z), pc.vel, Math.min(1, (pc.speed - 10) / 30), false);
+    const onWater = h < 1.2;
+    if (onWater && !this.wasOnWater && pc.vel.y < -4) {
+      this.fx.splash(_v.set(pc.pos.x, wy + 0.2, pc.pos.z), pc.vel, 1, true);
+      this.audio.play('land', { speed: 30 });
+    }
+    this.wasOnWater = onWater;
+  }
+
   /** 目標鎖定：沒鎖＝鎖準心方向最近的巨人；已鎖＝換下一隻（依距離＋偏離準心的程度排序） */
   _cycleTargetLock() {
     const L = this.cfg.camera.lock;
@@ -1441,7 +1485,11 @@ export class Game {
     // 鎖定時角色身體朝向目標（背對鏡頭繞圈，出刀一直朝著巨人）
     const faceYaw = lockTarget ? this.rig.yaw : hoverYaw;
     this.model.update(dt, pc, this.rig.yaw, faceYaw);
-    this.city.update(pc.pos);
+    this.city.update(pc.pos, performance.now() / 1000);
+    this.atmo.update(performance.now() / 1000, this.camera);
+    this.fx.ambient(this.camera, L_AMBIENT[this.level.map] || 'dust');
+    if (this.mission.type === 'defense') this._updateDefense();
+    if (this.city.waterY != null) this._updateWater(dt);
 
     // 鋼索瞄準預測（供下一次發射與 HUD 標記使用）
     this._updateAims();
@@ -1492,7 +1540,8 @@ export class Game {
     if (pc.levi || pc.flip || this.model.spinTimer > 0) swirl = 1;
     this.fx.updateSwirl(dt, pc.pos, pc.vel, swirl);
     if (pc.lunge) this.fx.trail(pc.pos);
-    if (pc.levi) this.fx.leviTrail(pc.pos, pc.levi.phase === 'dash');
+    if (pc.levi) this.fx.leviTrail(pc.pos, pc.levi.phase === 'dash', pc.vel);
+    this.fx.updateLevi(this.realDt ?? dt, pc.pos, pc.vel, pc.levi ? (pc.levi.phase === 'dash' ? 2 : 1) : 0);
     this.model.setLevi(pc.levi ? (pc.levi.phase === 'dash' ? 2 : 1) : 0, pc.vel);
     this.fx.setBladeTint(!!pc.levi);
     if (pc.sliding) this.fx.dust(pc.pos, pc.vel, 1);
@@ -1808,6 +1857,30 @@ export class Game {
       case 'steamHit':
         if (!this.grab) this.pc.damage(this.cfg.titan.steam.damage, this.pc.vel.clone()); // 被蒸氣吹開（推力在巨人那邊已經加上）
         break;
+      case 'awaken':
+        this.fx.bodySlam(titan.root.position, titan.scale * 0.6);
+        break;
+      case 'siegeWindup':
+        if (d < 140) this.audio.play('windup', { vol: 0.5 });
+        break;
+      case 'baseHit': {
+        this.baseHp = Math.max(0, (this.baseHp ?? this.level.base?.hp ?? 100) - e.damage);
+        this.mission.baseHp = this.baseHp;
+        this._updateMission();
+        const b = this.level.base || { x: 0, z: 0, radius: 42 };
+        _v.set(titan.root.position.x - b.x, 0, titan.root.position.z - b.z).setLength(b.radius * 0.8).add(_v2.set(b.x, 10, b.z));
+        this.fx.rockShatter(_v, false);
+        this.rig.addShake(this.cfg.feel.shake.graze);
+        this.audio.play('land', { speed: 40 });
+        if (this.baseHp <= 0 && this.state === 'playing') {
+          this.hud.toast('要塞被攻破了…', 'bad big', 2.5);
+          this.pc.hp = 0; // 交給原本的失敗流程
+        } else if (this.baseHp < 40 && !this.baseWarned) {
+          this.baseWarned = true;
+          this.hud.toast('⚠ 要塞耐久剩不到 40%！', 'warn big', 1.8);
+        }
+        break;
+      }
       case 'bodySlam': // 死亡撲倒落地
         this.fx.bodySlam(e.pos, titan.scale);
         if (d < 90) this.rig.addShake(this.cfg.feel.shake.part * (1 - d / 90));

@@ -398,13 +398,35 @@ export class Titan {
       if (o.isMesh) o.userData.noHook = false;
     });
     this.events.length = 0;
+    if ((this.spawn.wave ?? 0) > 0) this._sleep();
     this.updatePose(0);
     this.root.updateMatrixWorld(true);
     this._updateSpheres();
   }
 
   get alive() {
-    return this.state !== 'dying' && this.state !== 'dead';
+    return this.state !== 'dying' && this.state !== 'dead' && this.state !== 'dormant';
+  }
+
+  /** 據點防衛：還沒輪到的波次先休眠（看不到、勾不到、不會動） */
+  _sleep() {
+    this.state = 'dormant';
+    this.root.visible = false;
+    this.root.traverse((o) => {
+      if (o.isMesh) o.userData.noHook = true;
+    });
+  }
+
+  /** 輪到這一波：出現在地圖邊緣，開始往要塞走 */
+  activate() {
+    if (this.state !== 'dormant') return;
+    this.root.visible = true;
+    this.root.traverse((o) => {
+      if (o.isMesh && !o.userData.isOutline && !o.userData.armor) o.userData.noHook = false;
+    });
+    this.setState('walk');
+    this.attackCooldown = 2;
+    this.events.push({ type: 'awaken' });
   }
 
   /** 身高（公尺） */
@@ -630,6 +652,7 @@ export class Titan {
    * @param {{colliders:{min:THREE.Vector3,max:THREE.Vector3}[]}} world
    */
   update(dt, player, world) {
+    if (this.state === 'dormant') return;
     const T = this.cfg.titan;
     const S = this.scale;
     this.stateTime += dt;
@@ -675,6 +698,7 @@ export class Titan {
     switch (this.state) {
       case 'idle':
       case 'walk': {
+        if (this.spawn.target && !kneeling && !stunned && this._march(dt, player, dist)) break;
         if (this.kind === 'abnormal' && !kneeling && this._abnormalMove(dt, player, aggro, dist, targetYaw)) break;
         if (this.kind === 'thrower' && !kneeling && this._throwerMove(player, dist, facing, stunned, turn)) break;
         if (aggro) turn(T.turnRate * (kneeling ? 0.5 : 1));
@@ -845,6 +869,10 @@ export class Titan {
     this._updateSpheres();
 
     // 揮擊命中判定（右手掌 + 前臂）
+    if (this.state === 'swing' && this.siege && !this.siegeHit && this.stateTime > T.swing * 0.4) {
+      this.siegeHit = true;
+      this.events.push({ type: 'baseHit', damage: T.siegeDamage * this.scale });
+    }
     if (this.state === 'swing' && !this.swipeHit && player.hp > 0) {
       const hand = this.armR.hand.getWorldPosition(_v);
       const fore = this.spheres[11].center;
@@ -878,6 +906,50 @@ export class Titan {
         this.events.push({ type: 'grabbed' });
       }
     }
+  }
+
+  /**
+   * 據點防衛：玩家不在身邊時直直走向要塞；走到城牆邊就停下來砸（揮擊動作＝要塞扣耐久）。
+   * 玩家靠近（40m × 體型內）時交給一般的追擊／攻擊（回傳 false）。
+   */
+  _march(dt, player, dist) {
+    const T = this.cfg.titan;
+    const S = this.scale;
+    const tg = this.spawn.target;
+    // 玩家出城迎擊（在要塞外、離這隻 40m × 體型內）＝轉而追玩家；玩家躲在要塞裡＝照樣砸城牆
+    const inBase = Math.hypot(player.pos.x - tg.x, player.pos.z - tg.z) < (tg.radius ?? 42);
+    if (player.hp > 0 && dist < 40 * S && !inBase) {
+      this.siege = false;
+      return false;
+    }
+    const p = this.root.position;
+    const dx = tg.x - p.x, dz = tg.z - p.z;
+    const d = Math.hypot(dx, dz);
+    let yd = Math.atan2(dx, dz) - this.yaw;
+    yd = Math.atan2(Math.sin(yd), Math.cos(yd));
+    this.yaw += Math.max(-T.turnRate * dt, Math.min(T.turnRate * dt, yd));
+    const stopAt = (tg.radius ?? 42) + 6 * S;
+    if (d > stopAt) {
+      this.siege = false;
+      if (this.state !== 'walk') this.setState('walk');
+      const sp = T.walkSpeed * S * dt * (this.kind === 'armored' ? T.armored.walkFactor : 1) * (this.enrageT > 0 ? 1.45 : 1);
+      p.x += Math.sin(this.yaw) * sp;
+      p.z += Math.cos(this.yaw) * sp;
+      const prev = this.walkPhase;
+      this.walkPhase += dt * 1.6 / Math.sqrt(S);
+      if (Math.floor(prev / Math.PI) !== Math.floor(this.walkPhase / Math.PI)) this.events.push({ type: 'step' });
+      return true;
+    }
+    // 到城牆邊：砸城牆
+    if (this.state !== 'idle') this.setState('idle');
+    if (this.attackCooldown <= 0 && Math.abs(yd) < 0.4) {
+      this.siege = true;
+      this.siegeHit = false;
+      this.swipeHit = true; // 砸的是城牆，不是玩家
+      this.setState('windup');
+      this.events.push({ type: 'siegeWindup' });
+    }
+    return true;
   }
 
   /** 投石巨人：遠了就舉石頭丟，近了交給一般揮擊（回傳 true＝這一幀已處理） */

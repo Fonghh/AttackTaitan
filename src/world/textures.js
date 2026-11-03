@@ -101,6 +101,29 @@ export function wallTexture() {
   });
 }
 
+/** 卡通石磚：奶油色石塊、淺灰縫線，每塊顏色略有不同 */
+export function stoneTexture() {
+  const rnd = mulberry32(77);
+  return canvasTexture(256, (g, S) => {
+    g.fillStyle = '#d9cfbf';
+    g.fillRect(0, 0, S, S);
+    const rows = 8;
+    const h = S / rows;
+    for (let y = 0; y < rows; y++) {
+      const w = S / 4;
+      for (let x = -1; x < 5; x++) {
+        const off = y % 2 ? w / 2 : 0;
+        const v = 232 + rnd() * 18;
+        g.fillStyle = `rgb(${v},${v - 6},${v - 16})`;
+        const bx = x * w + off + 3, by = y * h + 3;
+        g.beginPath();
+        g.roundRect ? g.roundRect(bx, by, w - 6, h - 6, 5) : g.rect(bx, by, w - 6, h - 6);
+        g.fill();
+      }
+    }
+  });
+}
+
 /** 樹皮：直向的深淺紋路 */
 export function barkTexture() {
   const rnd = mulberry32(31);

@@ -6,6 +6,18 @@ import { CONFIG } from '../config.js';
  * @typedef {{type:'clear'}|{type:'time',max:number}|{type:'nohit'}} StarRule
  */
 
+
+// 據點防衛：三波巨人從四面八方走向要塞（越後面越大隻），一路擋下、一路砍
+const ring = (n, r, a0, opts) => Array.from({ length: n }, (_, i) => {
+  const a = a0 + (i / n) * Math.PI * 2;
+  return { x: Math.round(Math.sin(a) * r), z: Math.round(Math.cos(a) * r), yaw: a + Math.PI, homeRadius: 400, target: { x: 0, z: 0, radius: 42 }, ...opts(i) };
+});
+const FORT_WAVES = [
+  ring(3, 190, 0.4, (i) => ({ name: `先鋒巨人 ${i + 1}`, scale: 1.6 + (i % 2) * 0.3, wave: 0 })),
+  ring(4, 200, 1.1, (i) => ({ name: `大型巨人 ${i + 1}`, scale: 2.0 + (i % 2) * 0.3, wave: 1, kind: i === 3 ? 'armored' : 'normal' })),
+  ring(3, 210, 2.0, (i) => ({ name: i === 0 ? '超大型巨人' : `超大型護衛 ${i}`, scale: i === 0 ? 3.2 : 2.5, wave: 2, kind: i === 1 ? 'steam' : 'normal' })),
+].flat();
+
 export const LEVELS = [
   {
     id: 'controls',
@@ -68,33 +80,6 @@ export const LEVELS = [
     stars: [{ type: 'clear' }, { type: 'time', max: 300 }, { type: 'nohit' }],
   },
   {
-    id: 'rings',
-    name: '空中競速',
-    map: 'city',
-    objective: 'rings',
-    brief: '依序穿過懸在街道上空的 12 個光圈，越快越好。沒有巨人。',
-    spawn: CONFIG.player.spawn,
-    faceTo: { x: 0, z: 0 },
-    titans: [],
-    // 光圈都放在街道（x 是 50 的倍數）上空，不會卡進建築
-    rings: [
-      [0, 30, 95],
-      [0, 22, 50],
-      [0, 36, 0],
-      [-50, 26, -50],
-      [-50, 40, -100],
-      [-100, 30, -150],
-      [-150, 26, -100],
-      [-150, 36, -50],
-      [-100, 22, 0],
-      [-100, 44, 50],
-      [-50, 30, 100],
-      [50, 34, 100],
-    ],
-    ringRadius: 6,
-    stars: [{ type: 'clear' }, { type: 'time', max: 120 }, { type: 'time', max: 75 }],
-  },
-  {
     id: 'forest',
     name: '巨木森林',
     map: 'forest',
@@ -123,6 +108,35 @@ export const LEVELS = [
       { name: '鎧甲巨人', kind: 'armored', x: 100, z: 50, yaw: -1.2, scale: 1.25, homeRadius: 26 },
       { name: '蒸氣巨人', kind: 'steam', x: -100, z: 0, yaw: 1.2, scale: 1.2, homeRadius: 26 },
       { name: '北街投石巨人', kind: 'thrower', x: -50, z: -150, yaw: 0.3, scale: 0.95, homeRadius: 20 },
+    ],
+    stars: [{ type: 'clear' }, { type: 'time', max: 360 }, { type: 'nohit' }],
+  },
+  {
+    id: 'fort',
+    name: '據點防衛',
+    map: 'fort',
+    objective: 'defense',
+    brief: '超大型巨人分三波從四面八方襲向草原要塞！它們會直直走向要塞、靠近就砸城牆。要塞耐久歸零就失敗。站上塔樓、勾住後頸，一直砍下去。',
+    spawn: { x: 0, y: 58, z: 0 },
+    faceTo: { x: 0, z: 190 },
+    base: { x: 0, z: 0, radius: 42, hp: 100 },
+    titans: FORT_WAVES,
+    stars: [{ type: 'clear' }, { type: 'time', max: 480 }, { type: 'nohit' }],
+  },
+  {
+    id: 'harbor',
+    name: '港口迎擊',
+    map: 'harbor',
+    objective: 'kill',
+    brief: '巨人從海上走上港口！海水淹到它們的腿，碼頭、起重機、燈塔和船桅都能勾。貼著海面衝刺會濺起水花。討伐 5 隻巨人。',
+    spawn: { x: -70, y: 34, z: 30 },
+    faceTo: { x: 60, z: 0 },
+    titans: [
+      { name: '碼頭巨人', x: 30, z: -10, yaw: -1.4, scale: 1.3, homeRadius: 30 },
+      { name: '淺灘巨人', x: 95, z: 45, yaw: -1.8, scale: 1.6, homeRadius: 34 },
+      { name: '外海巨人', x: 140, z: -60, yaw: -1.2, scale: 2.1, homeRadius: 36 },
+      { name: '燈塔投石巨人', kind: 'thrower', x: 115, z: -130, yaw: -0.8, scale: 1.4, homeRadius: 26 },
+      { name: '倉庫奇行種', kind: 'abnormal', x: -40, z: -95, yaw: 0.6, scale: 1.3, homeRadius: 30 },
     ],
     stars: [{ type: 'clear' }, { type: 'time', max: 360 }, { type: 'nohit' }],
   },

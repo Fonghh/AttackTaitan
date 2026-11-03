@@ -455,15 +455,11 @@ export class PlayerModel {
     const glow = this.leviMode === 2 ? 1 : this.leviMode === 1 ? 0.6 + 0.25 * Math.sin(this.time * 30) : 0;
     this.leviGlow = (this.leviGlow || 0) + (glow - (this.leviGlow || 0)) * Math.min(1, dt * 14);
     const lg = this.leviGlow;
-    this.aura.material.opacity = lg * 0.7;
-    this.aura.visible = lg > 0.02;
-    this.aura.scale.setScalar(1.3 + 0.15 * Math.sin(this.time * 40));
-    this.aura2.material.opacity = lg * 0.35;
-    this.aura2.visible = lg > 0.02;
-    this.aura2.scale.setScalar(2.2 + 0.3 * Math.sin(this.time * 23));
+    // 兵長斬的視覺改由特效的「血刃旋風」負責：不再有包住全身的光球，身上只留一點點紅色殺氣
+    this.aura.visible = this.aura2.visible = false;
     for (const m of this.bodyMats) {
       const b = m.userData.baseEm || (m.userData.baseEm = m.emissive.clone());
-      m.emissive.setRGB(b.r + 0.9 * lg, b.g + 0.06 * lg, b.b + 0.08 * lg);
+      m.emissive.setRGB(b.r + 0.07 * lg, b.g, b.b + 0.01 * lg);
     }
     if (pc.flip && pc.flip.phase === 'tuck') {
       // 捲身翻轉：縮身往前翻一圈，翻完才爆衝

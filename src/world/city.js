@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { facadeTexture, toonFacadeTexture, groundTexture, wallTexture, barkTexture, mulberry32 } from './textures.js';
+import { facadeTexture, toonFacadeTexture, groundTexture, wallTexture, stoneTexture, barkTexture, mulberry32 } from './textures.js';
 
 const TILE = 32; // 外牆貼圖一張代表 32m（8 格 × 4m）
 
@@ -105,20 +105,86 @@ function makeSky(colors = SKY_CLASSIC) {
  * @param {{wallRadius:number, wallHeight:number}} cfg
  * @param {{x:number,z:number}} spawn
  * @param {boolean} lowSpec
- * @param {'city'|'training'|'forest'} layout 地圖：城區／訓練場／巨木森林
+ * @param {'city'|'training'|'forest'|'fort'|'harbor'} layout 地圖：城區／訓練場／巨木森林／草原要塞／港口
  * @param {{x:number,z:number,r:number}[]} clearings 森林裡要留空的地方（巨人地盤）
  */
+/**
+ * 卡通海面：外海深藍、近岸淺綠藍，岸邊與波峰有白色浪花條紋；頂點上下起伏（小波浪）。
+ */
+function makeWater(R, shore, y, toon) {
+  const w = R + 40 - shore;
+  const geo = new THREE.PlaneGeometry(w, R * 2 + 80, 90, 120).rotateX(-Math.PI / 2);
+  const mat = new THREE.ShaderMaterial({
+    transparent: true,
+    uniforms: {
+      uTime: { value: 0 },
+      uShore: { value: shore },
+      uDeep: { value: new THREE.Color(toon ? '#3f9fd8' : '#2c5f86') },
+      uShallow: { value: new THREE.Color(toon ? '#7fd8e6' : '#5d9bb0') },
+      uFoam: { value: new THREE.Color('#ffffff') },
+      fogColor: { value: new THREE.Color('#d6ecfa') },
+      fogNear: { value: 190 },
+      fogFar: { value: 700 },
+    },
+    fog: true,
+    vertexShader: `
+      uniform float uTime;
+      varying vec3 vW;
+      varying float vH;
+      #include <fog_pars_vertex>
+      void main() {
+        vec3 p = position;
+        float h = sin(p.x * 0.08 + uTime * 1.3) * 0.35 + sin(p.z * 0.11 - uTime * 1.1) * 0.3 + sin((p.x + p.z) * 0.21 + uTime * 2.0) * 0.12;
+        p.y += h;
+        vH = h;
+        vec4 wp = modelMatrix * vec4(p, 1.0);
+        vW = wp.xyz;
+        vec4 mvPosition = viewMatrix * wp;
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader: `
+      uniform float uTime, uShore;
+      uniform vec3 uDeep, uShallow, uFoam;
+      varying vec3 vW;
+      varying float vH;
+      #include <fog_pars_fragment>
+      void main() {
+        float d = vW.x - uShore;
+        vec3 col = mix(uShallow, uDeep, smoothstep(0.0, 120.0, d));
+        // 岸邊白浪（一條條往岸邊推）
+        float shoreFoam = smoothstep(14.0, 0.0, d) * (0.55 + 0.45 * sin(d * 0.9 - uTime * 2.4));
+        // 波峰的白色碎浪
+        float crest = smoothstep(0.42, 0.62, vH + 0.12 * sin(vW.x * 0.7 + vW.z * 0.5 + uTime * 3.0));
+        // 一點一點的反光
+        float spark = step(0.985, fract(sin(dot(floor(vW.xz * 0.6), vec2(12.9898, 78.233))) * 43758.5453 + uTime * 0.25));
+        col = mix(col, uFoam, clamp(shoreFoam + crest * 0.6 + spark * 0.7, 0.0, 1.0));
+        gl_FragColor = vec4(col, 0.93);
+        #include <fog_fragment>
+      }`,
+  });
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(shore + w / 2, y, 0);
+  m.userData.keepMaterial = true; // 卡通化時不換材質
+  return m;
+}
+
 export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings = [], style = 'classic') {
   const colliders = [];
   const hookables = [];
   const snapAnchors = [];
   const rnd = mulberry32(1234);
   const forest = layout === 'forest';
+  const fort = layout === 'fort';
+  const harbor = layout === 'harbor';
+  const green = forest || fort; // 草地地面
+  const WATER_Y = 5; // 港口海面高度
+  let water = null; // 港口的海面（每幀更新波浪）
   const toon = style === 'toon'; // 卡通風：粉彩、圓角、明亮柔和的光
 
   if (toon) {
-    scene.background = new THREE.Color(forest ? '#c4ead8' : '#cdeafc');
-    scene.fog = forest ? new THREE.Fog('#cbe9d6', 110, 470) : new THREE.Fog('#dcefff', 170, 620);
+    scene.background = new THREE.Color(forest ? '#c4ead8' : fort ? '#d4ecf4' : '#cdeafc');
+    scene.fog = forest ? new THREE.Fog('#cbe9d6', 110, 470) : fort ? new THREE.Fog('#dcecee', 160, 640) : harbor ? new THREE.Fog('#d6ecfa', 190, 700) : new THREE.Fog('#dcefff', 170, 620);
     scene.add(makeSky(SKY_TOON));
   } else {
     scene.background = new THREE.Color(forest ? '#9fc2c8' : '#a9cbe6');
@@ -150,14 +216,14 @@ export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings
   const ground = new THREE.Mesh(
     new THREE.CircleGeometry(cfg.wallRadius + 20, 64).rotateX(-Math.PI / 2),
     toon
-      ? new THREE.MeshStandardMaterial({ color: forest ? '#b5dc96' : layout === 'training' ? '#f3e7cf' : '#e9e4d8', roughness: 1 })
-      : new THREE.MeshStandardMaterial({ map: gtex, roughness: 1, color: forest ? '#7f9a66' : '#ffffff' }),
+      ? new THREE.MeshStandardMaterial({ color: forest ? '#b5dc96' : fort ? '#a9d98a' : harbor ? '#ecdcb4' : layout === 'training' ? '#f3e7cf' : '#e9e4d8', roughness: 1 })
+      : new THREE.MeshStandardMaterial({ map: gtex, roughness: 1, color: green ? '#7f9a66' : '#ffffff' }),
   );
   ground.receiveShadow = true;
   scene.add(ground);
 
   // 中央廣場（巨人活動區）；訓練場是一片沙地
-  if (layout !== 'forest') {
+  if (layout === 'city' || layout === 'training') {
     const plaza = new THREE.Mesh(
       new THREE.CircleGeometry(layout === 'training' ? 75 : 55, 48).rotateX(-Math.PI / 2),
       new THREE.MeshStandardMaterial({ color: toon ? (layout === 'training' ? '#f6dcb0' : '#f7e9cf') : layout === 'training' ? '#b9a27a' : '#9b927f', roughness: 1 }),
@@ -305,8 +371,9 @@ export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings
     return roofTaken;
   }
 
-  function addBuilding(x, z, w, d, h, plain = false) {
-    const wm = wallMats[Math.floor(rnd() * wallMats.length)];
+  function addBuilding(x, z, w, d, h, plain = false, mat = null) {
+    const wm0 = wallMats[Math.floor(rnd() * wallMats.length)];
+    const wm = mat || wm0;
     const geo = toon ? roundedBoxWithWorldUV(w, h, d, Math.min(1.4, Math.min(w, d) * 0.07)) : boxWithWorldUV(w, h, d);
     const mesh = new THREE.Mesh(wallRoofGroups(geo), [wm, roofMat]);
     mesh.position.set(x, h / 2, z);
@@ -388,7 +455,167 @@ export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings
 
   if (layout === 'city') buildStreets();
   else if (layout === 'training') buildTraining();
+  else if (fort) buildFort();
+  else if (harbor) buildHarbor();
   else buildForest();
+  flushProps(); // 所有地圖的裝飾小物（屋頂矮牆、尖頂…）都要加進場景（城區在 buildStreets 裡已先加過）
+
+  /** 可以勾的樹（樹幹＋樹冠都能勾），要塞外的草原用 */
+  function addFieldTree(x, z, h) {
+    const trunkMat = (addFieldTree.trunk ||= new THREE.MeshStandardMaterial({ color: toon ? '#c08a5c' : '#6b4a32', roughness: 1 }));
+    const leafMats = (addFieldTree.leaves ||= ['#7fcf6e', '#94d97c', '#6fbf72'].map((c) => new THREE.MeshStandardMaterial({ color: toon ? c : '#4d7a40', roughness: 1, flatShading: true })));
+    const r = 1.4 + h * 0.025;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.7, r, h, 8), trunkMat);
+    trunk.position.set(x, h / 2, z);
+    trunk.castShadow = trunk.receiveShadow = true;
+    scene.add(trunk);
+    hookables.push(trunk);
+    colliders.push({ min: new THREE.Vector3(x - r, 0, z - r), max: new THREE.Vector3(x + r, h, z + r) });
+    const cr = h * 0.32;
+    for (const [ox, oy, oz, k] of [[0, 0, 0, 1], [cr * 0.55, -cr * 0.35, cr * 0.2, 0.7], [-cr * 0.5, -cr * 0.3, -cr * 0.3, 0.65]]) {
+      const c = new THREE.Mesh(new THREE.IcosahedronGeometry(cr * k, 1), leafMats[Math.floor(drnd() * leafMats.length)]);
+      c.position.set(x + ox, h + oy, z + oz);
+      c.castShadow = true;
+      scene.add(c);
+      hookables.push(c);
+    }
+  }
+
+  /** 尖頂（圓錐屋頂），裝飾用 */
+  function spire(x, z, y, r, h, color) {
+    const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, toon ? 10 : 4), (spire[color] ||= new THREE.MeshStandardMaterial({ color, roughness: 0.8 })));
+    m.position.set(x, y + h / 2, z);
+    addProp(m);
+  }
+
+  function buildFort() {
+    // 石砌要塞（石磚外牆）：中央主堡（起點）＋四角塔樓＋城牆（都能勾）
+    const stoneTex = toon ? stoneTexture() : wallTexture();
+    stoneTex.repeat.set(1.4, 1.4); // 一塊石磚約 1.4m 高
+    const stone = new THREE.MeshStandardMaterial({ map: stoneTex, color: '#ffffff', roughness: 1 });
+    const wood = new THREE.MeshStandardMaterial({ map: stoneTex, color: toon ? '#e8bf92' : '#a0815e', roughness: 1 });
+    const B = (x, z, w, d, h, m = stone) => addBuilding(x, z, w, d, h, true, m);
+    B(0, 0, 16, 16, 56);
+    spire(0, 0, 57, 9, 14, '#e2574c');
+    for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      B(sx * 32, sz * 32, 10, 10, 42);
+      spire(sx * 32, sz * 32, 43, 6.5, 10, '#4f8fd9');
+    }
+    for (const [x, z, w, d] of [[0, 32, 54, 4], [0, -32, 54, 4], [32, 0, 4, 54], [-32, 0, 4, 54]]) B(x, z, w, d, 16);
+    // 外圍瞭望塔（巨人走過來的路上）
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + 0.2;
+      const r = 100 + (i % 2) * 25;
+      B(Math.sin(a) * r, Math.cos(a) * r, 7, 7, 34 + (i % 3) * 6, wood);
+      spire(Math.sin(a) * r, Math.cos(a) * r, 35 + (i % 3) * 6, 5, 7, '#c9834f');
+    }
+    // 草原上的樹叢
+    for (let i = 0; i < 34; i++) {
+      const a = drnd() * Math.PI * 2, r = 60 + drnd() * 170;
+      const x = Math.sin(a) * r, z = Math.cos(a) * r;
+      if (colliders.some((c) => x > c.min.x - 6 && x < c.max.x + 6 && z > c.min.z - 6 && z < c.max.z + 6)) continue;
+      addFieldTree(x, z, 26 + drnd() * 22);
+    }
+  }
+
+  function buildHarbor() {
+    // 西邊是陸地（倉庫、起重機），東邊（x > 20）是海：海面可以踩著滑（碰撞箱頂＝海面），巨人站在海裡
+    const SHORE = 20;
+    // 沙灘
+    const sand = new THREE.Mesh(new THREE.PlaneGeometry(30, cfg.wallRadius * 2).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: toon ? '#f6e3b4' : '#c9b48a', roughness: 1 }));
+    sand.position.set(SHORE - 8, 0.03, 0);
+    sand.receiveShadow = true;
+    scene.add(sand);
+    water = makeWater(cfg.wallRadius, SHORE, WATER_Y, toon);
+    scene.add(water);
+    colliders.push({ min: new THREE.Vector3(SHORE, -20, -cfg.wallRadius - 20), max: new THREE.Vector3(cfg.wallRadius + 20, WATER_Y - 0.3, cfg.wallRadius + 20), water: true, noTitan: true });
+    // 碼頭（伸進海裡，可以勾、可以站）
+    for (const [z, len] of [[-10, 90], [40, 70], [-70, 80]]) addBuilding(SHORE + len / 2 - 6, z, len, 8, WATER_Y + 2.5, true);
+    // 倉庫（陸地上，斜屋頂）與幾棟高樓
+    for (let gx = -170; gx <= -10; gx += 32) {
+      for (let gz = -170; gz <= 170; gz += 34) {
+        if (Math.hypot(gx, gz) > cfg.wallRadius - 30) continue;
+        if (Math.hypot(gx + 70, gz - 30) < 18) continue; // 起點塔附近留空
+        if (Math.hypot(gx + 40, gz + 95) < 30) continue; // 奇行種的地盤
+        if (drnd() < 0.18) continue;
+        const w = 18 + drnd() * 8, d = 18 + drnd() * 8;
+        const h = drnd() < 0.25 ? 38 + drnd() * 20 : 13 + drnd() * 12;
+        addBuilding(gx + (drnd() - 0.5) * 6, gz + (drnd() - 0.5) * 6, w, d, h);
+      }
+    }
+    addBuilding(-70, 30, 12, 12, 32, true); // 起點塔
+    // 起重機：高塔（可勾）＋伸向海面的吊臂（可勾）＋垂下來的吊鉤貨箱
+    const craneMat = new THREE.MeshStandardMaterial({ color: toon ? '#f6b73c' : '#b8862e', roughness: 0.7 });
+    for (const [x, z] of [[8, -24], [8, 26], [8, -56]]) {
+      addBuilding(x, z, 5, 5, 46, true);
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(34, 2.5, 2.5), craneMat);
+      arm.position.set(x + 15, 47, z);
+      arm.castShadow = true;
+      scene.add(arm);
+      hookables.push(arm);
+      colliders.push({ min: new THREE.Vector3(x - 2, 45.75, z - 1.25), max: new THREE.Vector3(x + 32, 48.25, z + 1.25) });
+      const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 16, 4), craneMat);
+      cable.position.set(x + 28, 39, z);
+      addProp(cable);
+      const crate = new THREE.Mesh(new RoundedBoxGeometry(5, 4, 5, 2, 0.4), propMats ? propMats.awnings[Math.floor(drnd() * 5)] : craneMat);
+      crate.position.set(x + 28, 29, z);
+      addProp(crate);
+    }
+    // 燈塔（小島上，紅白條紋）
+    const lhX = 150, lhZ = -150;
+    const isle = new THREE.Mesh(new THREE.CylinderGeometry(16, 20, WATER_Y + 1, 16), new THREE.MeshStandardMaterial({ color: toon ? '#b9b3a6' : '#7d786d', roughness: 1, flatShading: true }));
+    isle.position.set(lhX, (WATER_Y + 1) / 2, lhZ);
+    isle.receiveShadow = true;
+    scene.add(isle);
+    colliders.push({ min: new THREE.Vector3(lhX - 15, 0, lhZ - 15), max: new THREE.Vector3(lhX + 15, WATER_Y + 1, lhZ + 15), noTitan: true });
+    for (let i = 0; i < 6; i++) {
+      const seg = new THREE.Mesh(new THREE.CylinderGeometry(4.6 - i * 0.3, 4.9 - i * 0.3, 9, 16), new THREE.MeshStandardMaterial({ color: i % 2 ? '#e2574c' : '#ffffff', roughness: 0.8 }));
+      seg.position.set(lhX, WATER_Y + 1 + 4.5 + i * 9, lhZ);
+      seg.castShadow = true;
+      scene.add(seg);
+      hookables.push(seg);
+    }
+    colliders.push({ min: new THREE.Vector3(lhX - 4.8, 0, lhZ - 4.8), max: new THREE.Vector3(lhX + 4.8, WATER_Y + 56, lhZ + 4.8) });
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(3.2, 12, 10), new THREE.MeshStandardMaterial({ color: '#fff4c8', emissive: '#ffd56a', emissiveIntensity: 1.2 }));
+    lamp.position.set(lhX, WATER_Y + 59, lhZ);
+    scene.add(lamp);
+    spire(lhX, lhZ, WATER_Y + 61, 4.5, 6, '#e2574c');
+    // 停在海上的帆船（船身可以站，桅桿可以勾）
+    const hullMat = new THREE.MeshStandardMaterial({ color: toon ? '#a7714b' : '#5e4330', roughness: 0.9 });
+    const sailMat = new THREE.MeshStandardMaterial({ color: '#fff8ea', roughness: 0.9, side: THREE.DoubleSide });
+    for (const [x, z, rot] of [[70, 95, 0.3], [185, 20, -0.2], [60, -120, 0.9]]) {
+      const hull = new THREE.Mesh(new RoundedBoxGeometry(34, 7, 11, 2, 2.2), hullMat);
+      hull.position.set(x, WATER_Y + 1.5, z);
+      hull.rotation.y = rot;
+      hull.castShadow = hull.receiveShadow = true;
+      scene.add(hull);
+      hookables.push(hull);
+      const c = Math.cos(rot), sn = Math.sin(rot);
+      colliders.push({ min: new THREE.Vector3(x - 15, 0, z - 15), max: new THREE.Vector3(x + 15, WATER_Y + 5, z + 15), noTitan: true });
+      for (const off of [-8, 7]) {
+        const mx = x + c * off, mz = z - sn * off;
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.8, 34, 8), hullMat);
+        mast.position.set(mx, WATER_Y + 5 + 17, mz);
+        mast.castShadow = true;
+        scene.add(mast);
+        hookables.push(mast);
+        colliders.push({ min: new THREE.Vector3(mx - 0.8, 0, mz - 0.8), max: new THREE.Vector3(mx + 0.8, WATER_Y + 39, mz + 0.8) });
+        const sail = new THREE.Mesh(new THREE.PlaneGeometry(12, 16, 4, 4), sailMat);
+        const sp = sail.geometry.attributes.position;
+        for (let i = 0; i < sp.count; i++) sp.setZ(i, Math.sin((sp.getX(i) / 12 + 0.5) * Math.PI) * 2.2); // 鼓起來的帆
+        sail.geometry.computeVertexNormals();
+        sail.position.set(mx, WATER_Y + 22, mz);
+        sail.rotation.y = rot + Math.PI / 2;
+        scene.add(sail);
+      }
+    }
+    // 浮標
+    for (let i = 0; i < 10; i++) {
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(1, 1.3, 2.2, 10), new THREE.MeshStandardMaterial({ color: i % 2 ? '#e2574c' : '#ffd27a', roughness: 0.7 }));
+      b.position.set(40 + drnd() * 200, WATER_Y + 0.6, (drnd() - 0.5) * 380);
+      addProp(b);
+    }
+  }
 
   function buildTraining() {
     // 起點台
@@ -734,11 +961,13 @@ export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings
     hookables,
     snapAnchors,
     sun,
-    /** 讓陰影範圍跟著玩家 */
-    update(focus) {
+    waterY: harbor ? WATER_Y : null,
+    /** 讓陰影範圍跟著玩家；港口的海面波浪 */
+    update(focus, time = 0) {
       sun.position.copy(focus).add(sunOffset);
       sun.target.position.copy(focus);
       sun.target.updateMatrixWorld();
+      if (water) water.material.uniforms.uTime.value = time;
     },
   };
 }

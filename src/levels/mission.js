@@ -1,4 +1,4 @@
-// 任務進行：訓練步驟、全部討伐、光圈競速。給 HUD 的任務文字、下一個目標點，以及是否完成。
+// 任務進行：訓練步驟、全部討伐、據點防衛（分波）、光圈競速。給 HUD 的任務文字、下一個目標點，以及是否完成。
 import * as THREE from 'three';
 
 export class Mission {
@@ -102,6 +102,14 @@ export class Mission {
     return titans.length > 0 && titans.every((t) => t.state === 'dead');
   }
 
+  /** 據點防衛：目前第幾波（0 起算）、總波數 */
+  waveInfo(titans) {
+    const waves = Math.max(1, ...titans.map((t) => (t.spawn.wave ?? 0) + 1));
+    const active = titans.filter((t) => t.state !== 'dormant');
+    const cur = Math.max(0, ...active.map((t) => t.spawn.wave ?? 0));
+    return { cur, waves };
+  }
+
   /** HUD 上方的任務文字 */
   text(titans) {
     if (this.type === 'tutorial') {
@@ -116,6 +124,12 @@ export class Mission {
     }
     if (this.type === 'rings') {
       return this.ringIndex >= this.rings.length ? '全部通過！' : `光圈 ${this.ringIndex + 1}/${this.rings.length}：穿過發光的黃色光圈`;
+    }
+    if (this.type === 'defense') {
+      const { cur, waves } = this.waveInfo(titans);
+      const wave = titans.filter((t) => (t.spawn.wave ?? 0) === cur);
+      const left = wave.filter((t) => t.alive).length;
+      return `第 ${cur + 1}/${waves} 波　剩 ${left} 隻　要塞耐久 ${Math.max(0, Math.round(this.baseHp ?? 100))}%`;
     }
     const dead = titans.filter((t) => !t.alive).length;
     return dead >= titans.length ? '全部討伐完成！' : `任務：討伐巨人 ${dead}/${titans.length}　弱點＝後頸（發光處）`;

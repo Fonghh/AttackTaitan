@@ -1095,3 +1095,21 @@ body.tutorial #toast {
 @keyframes lockspin {
   to { rotate: 360deg; }
 }
+
+/* 暗角＋地圖色調：四角微暗、森林偏青綠、港口偏藍、要塞偏暖（只是一層半透明漸層，不影響效能） */
+#vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(ellipse at 50% 45%, rgba(0, 0, 0, 0) 55%, rgba(30, 40, 60, 0.28) 100%);
+}
+body[data-map='forest'] #vignette {
+  background: radial-gradient(ellipse at 50% 45%, rgba(0, 0, 0, 0) 50%, rgba(10, 60, 55, 0.34) 100%);
+}
+body[data-map='harbor'] #vignette {
+  background: radial-gradient(ellipse at 50% 45%, rgba(0, 0, 0, 0) 55%, rgba(20, 60, 110, 0.28) 100%);
+}
+body[data-map='fort'] #vignette {
+  background: radial-gradient(ellipse at 50% 45%, rgba(0, 0, 0, 0) 55%, rgba(90, 60, 20, 0.22) 100%);
+}

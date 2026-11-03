@@ -665,6 +665,62 @@ export class Effects {
       this.stars.push({ m, t: 0, max: 0.2, size: 1 });
     }
     this.si = 0;
+    // 兵長斬「血刃旋風」：三道紅白新月刃環，繞著飛行方向高速旋轉
+    this.levi = new THREE.Group();
+    this.levi.visible = false;
+    this.leviRings = [];
+    for (let i = 0; i < 3; i++) {
+      const r1 = 1.5 + i * 0.45, r0 = r1 - 0.22 - i * 0.05;
+      const geo = new THREE.RingGeometry(r0, r1, 56, 1, 0, Math.PI * (1.15 + i * 0.1)).rotateX(-Math.PI / 2);
+      // 刃頭白、刃尾紅、尾端淡出
+      const pa = geo.attributes.position;
+      const col = new Float32Array(pa.count * 3);
+      const span = Math.PI * (1.15 + i * 0.1);
+      for (let k = 0; k < pa.count; k++) {
+        const a = Math.atan2(-pa.getZ(k), pa.getX(k));
+        const u = Math.max(0, Math.min(1, (a < 0 ? a + Math.PI * 2 : a) / span)); // 0＝刃尾、1＝刃頭
+        const fade = Math.pow(u, 0.9); // 刃尾淡出
+        const white = Math.pow(u, 6); // 只有刃頭一小段是白的，其他是深紅
+        col[k * 3] = (0.95 + 0.05 * white) * fade;
+        col[k * 3 + 1] = (0.06 + 0.9 * white) * fade;
+        col[k * 3 + 2] = (0.14 + 0.82 * white) * fade;
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+      m.frustumCulled = false;
+      const pivot = new THREE.Group();
+      pivot.rotation.set((i - 1) * 0.35, 0, (i - 1) * 0.25); // 三道刃環錯開角度
+      pivot.add(m);
+      this.levi.add(pivot);
+      this.leviRings.push({ m, pivot, speed: 26 + i * 7, phase: i * 2.1 });
+    }
+    scene.add(this.levi);
+    this._leviAxis = new THREE.Vector3(0, 1, 0);
+    this._leviAcc = 0;
+  }
+
+  /**
+   * 兵長斬的刃環：mode 1＝蓄力（直立、慢轉、脈動），2＝直衝（以飛行方向為軸高速旋轉），0＝收起。
+   * 刃環整個淡入淡出，不會突然出現或消失。
+   */
+  updateLevi(dt, pos, vel, mode) {
+    const g = this.levi;
+    const target = mode === 2 ? 1 : mode === 1 ? 0.55 : 0;
+    this._leviK = (this._leviK || 0) + (target - (this._leviK || 0)) * Math.min(1, dt * (target > (this._leviK || 0) ? 14 : 6));
+    const k = this._leviK;
+    g.visible = k > 0.02;
+    if (!g.visible) return;
+    g.position.set(pos.x, pos.y + 0.3, pos.z);
+    if (mode === 2 && vel.lengthSq() > 1) this._leviAxis.lerp(_v.copy(vel).normalize(), Math.min(1, dt * 12)).normalize();
+    else if (mode === 1) this._leviAxis.lerp(_v.set(0, 1, 0), Math.min(1, dt * 6)).normalize();
+    g.quaternion.setFromUnitVectors(_v2.set(0, 1, 0), this._leviAxis);
+    const t = performance.now() / 1000;
+    for (const r of this.leviRings) {
+      r.m.rotation.y += r.speed * (mode === 2 ? 1 : 0.22) * dt;
+      const pulse = mode === 1 ? 0.75 + 0.25 * Math.sin(t * 9 + r.phase) : 1;
+      r.m.material.opacity = k * pulse * 0.95;
+      r.m.scale.setScalar(mode === 2 ? 1 : 0.85 + 0.1 * Math.sin(t * 5 + r.phase));
+    }
   }
 
   /** 衝擊波圓環：flat＝平放在地上；否則面向鏡頭 */
@@ -836,6 +892,36 @@ export class Effects {
     this.shockRing(pos, big ? 4.5 : 3, '#ffffff', 0.3);
   }
 
+  /** 水花：貼著海面高速飛＝往後噴的水霧；落水（big）＝一圈往上噴的水柱＋漣漪 */
+  splash(pos, vel, k, big) {
+    const n = big ? 34 : Math.ceil(2 + k * 5);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = big ? 4 + Math.random() * 7 : 2 + Math.random() * 3;
+      this.smoke.spawn({
+        x: pos.x + (Math.random() - 0.5) * 1.2, y: pos.y, z: pos.z + (Math.random() - 0.5) * 1.2,
+        vx: Math.cos(a) * sp - vel.x * (big ? 0.05 : 0.25), vy: (big ? 9 : 3 + k * 5) * (0.6 + Math.random() * 0.6), vz: Math.sin(a) * sp - vel.z * (big ? 0.05 : 0.25),
+        max: 0.6 + Math.random() * 0.4, s0: 0.5, s1: big ? 2.6 : 1.4 + k, r: 0.9, g: 0.97, b: 1, a: 0.75, grav: 18, drag: 1.2,
+      });
+    }
+    if (big) this.shockRing(_v.set(pos.x, pos.y + 0.1, pos.z), 6, '#e8fbff', 0.6, true);
+    else if (Math.random() < 0.08 * k) this.shockRing(_v.set(pos.x, pos.y + 0.1, pos.z), 2.5, '#e8fbff', 0.45, true);
+  }
+
+  /** 空氣中的漂浮物：鏡頭附近慢慢飄的小光點（每幀呼叫，數量很少） */
+  ambient(camera, kind) {
+    const rate = kind === 'forest' ? 0.9 : kind === 'pollen' ? 0.6 : kind === 'sea' ? 0.5 : 0.3;
+    if (Math.random() > rate) return;
+    const p = camera.position;
+    const a = Math.random() * Math.PI * 2, r = 4 + Math.random() * 22;
+    const c = kind === 'forest' ? [0.85, 1, 0.55] : kind === 'pollen' ? [1, 1, 0.92] : kind === 'sea' ? [0.85, 0.97, 1] : [1, 0.96, 0.88];
+    this.glow.spawn({
+      x: p.x + Math.cos(a) * r, y: p.y + (Math.random() - 0.6) * 10, z: p.z + Math.sin(a) * r,
+      vx: (Math.random() - 0.5) * 1.2 + (kind === 'pollen' ? 1.2 : 0), vy: kind === 'forest' ? -0.3 + Math.random() * 0.6 : 0.2 + Math.random() * 0.4, vz: (Math.random() - 0.5) * 1.2,
+      max: 3 + Math.random() * 2, s0: 0.12 + Math.random() * 0.1, s1: 0.06, r: c[0], g: c[1], b: c[2], a: 0.7, drag: 0.2,
+    });
+  }
+
   /** 巨人撲倒落地：一大圈塵土往外噴、地面衝擊波、蒸氣往上冒 */
   bodySlam(pos, scale = 1) {
     for (let i = 0; i < 40; i++) {
@@ -953,25 +1039,52 @@ export class Effects {
   setBladeTint(levi) {
     if (this._bladeTint === levi) return;
     this._bladeTint = levi;
-    this.blades.left.color.set(levi ? '#ff4f9a' : '#b98bff');
-    this.blades.right.color.set(levi ? '#ff86c0' : '#7fd8ff');
+    this.blades.left.color.set(levi ? '#ff2f45' : '#b98bff');
+    this.blades.right.color.set(levi ? '#ffffff' : '#7fd8ff');
   }
 
-  /** 兵長斬蓄力：紅光往內收 */
+  /** 兵長斬蓄力：暗紅「殺氣」墨霧與紅白火花往身上收 */
   leviCharge(pos) {
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 26; i++) {
       const a = Math.random() * Math.PI * 2, e = (Math.random() - 0.5) * 2;
-      const dx = Math.sin(a) * 3, dz = Math.cos(a) * 3, dy = e * 2;
-      this.glow.spawn({ x: pos.x + dx, y: pos.y + 0.3 + dy, z: pos.z + dz, vx: -dx * 7, vy: -dy * 7, vz: -dz * 7, max: 0.18, s0: 0.35, s1: 0.05, r: 1, g: 0.2, b: 0.25, drag: 2 });
+      const dx = Math.sin(a) * 3.2, dz = Math.cos(a) * 3.2, dy = e * 2;
+      const white = Math.random() < 0.3;
+      this.glow.spawn({ x: pos.x + dx, y: pos.y + 0.3 + dy, z: pos.z + dz, vx: -dx * 7, vy: -dy * 7, vz: -dz * 7, max: 0.18, s0: white ? 0.3 : 0.4, s1: 0.05, r: 1, g: white ? 0.95 : 0.12, b: white ? 0.95 : 0.18, drag: 2 });
+    }
+    for (let i = 0; i < 8; i++) {
+      const a = Math.random() * Math.PI * 2;
+      this.smoke.spawn({ x: pos.x + Math.sin(a) * 3.5, y: pos.y + (Math.random() - 0.3) * 2, z: pos.z + Math.cos(a) * 3.5, vx: -Math.sin(a) * 6, vy: 0.5, vz: -Math.cos(a) * 6, max: 0.5, s0: 1.4, s1: 0.4, r: 0.32, g: 0.03, b: 0.07, a: 0.55, drag: 1.5 });
     }
   }
 
-  /** 兵長斬的粉紅殘光（直衝時又多又長） */
-  leviTrail(pos, dashing) {
-    const n = dashing ? 7 : 1;
-    for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2, r = dashing ? 0.6 + Math.random() * 0.6 : 0.8;
-      this.glow.spawn({ x: pos.x + Math.sin(a) * r, y: pos.y + 0.3 + Math.cos(a) * r, z: pos.z + Math.cos(a) * r * 0.6, vx: 0, vy: 0, vz: 0, max: dashing ? 0.45 : 0.25, s0: dashing ? 0.8 : 0.4, s1: 0.08, r: 1, g: 0.35 + Math.random() * 0.25, b: 0.65, a: 0.9 });
+  /**
+   * 兵長斬的殘光：直衝時沿路拉出紅白雙螺旋、暗紅墨霧，並每隔一小段留下一道紅色斬痕（新月刀光）。
+   */
+  leviTrail(pos, dashing, vel) {
+    if (!dashing) {
+      // 蓄力中：身邊零星的紅色火星
+      if (Math.random() < 0.5) this.glow.spawn({ x: pos.x + (Math.random() - 0.5) * 1.6, y: pos.y + 0.3 + (Math.random() - 0.5) * 1.6, z: pos.z + (Math.random() - 0.5) * 1.6, vx: 0, vy: 1.5, vz: 0, max: 0.3, s0: 0.25, s1: 0.05, r: 1, g: 0.15, b: 0.2 });
+      return;
+    }
+    const axis = this._leviAxis;
+    // 和飛行方向垂直的兩個軸，用來畫螺旋
+    const u = _v.set(0, 1, 0).cross(axis);
+    if (u.lengthSq() < 1e-4) u.set(1, 0, 0);
+    u.normalize();
+    const w = _v2.copy(axis).cross(u).normalize();
+    const t = performance.now() / 1000;
+    for (let strand = 0; strand < 2; strand++) {
+      const a = t * 30 + strand * Math.PI;
+      const R = 1.5;
+      const ox = (u.x * Math.cos(a) + w.x * Math.sin(a)) * R, oy = (u.y * Math.cos(a) + w.y * Math.sin(a)) * R, oz = (u.z * Math.cos(a) + w.z * Math.sin(a)) * R;
+      this.glow.spawn({ x: pos.x + ox, y: pos.y + 0.3 + oy, z: pos.z + oz, vx: 0, vy: 0, vz: 0, max: 0.4, s0: strand ? 0.45 : 0.55, s1: 0.06, r: 1, g: strand ? 0.2 : 0.95, b: strand ? 0.25 : 0.95, a: 0.95 });
+    }
+    this.smoke.spawn({ x: pos.x + (Math.random() - 0.5), y: pos.y + 0.3 + (Math.random() - 0.5), z: pos.z + (Math.random() - 0.5), vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3, vz: (Math.random() - 0.5) * 3, max: 0.7, s0: 0.9, s1: 2.4, r: 0.3, g: 0.03, b: 0.06, a: 0.5, drag: 2 });
+    // 沿路的紅色斬痕
+    this._leviAcc += 1;
+    if (this._leviAcc >= 3) {
+      this._leviAcc = 0;
+      this.slashes.spawn(_v.set(pos.x, pos.y + 0.3, pos.z), axis, Math.random() * Math.PI * 2, 0.85, Math.random() < 0.8 ? '#ff2f45' : '#ffd6dc', 0.5, 0.28);
     }
   }
 
@@ -1082,6 +1195,8 @@ export class Effects {
     for (const p of this.glow.p) p.life = 0;
     for (const p of this.smoke.p) p.life = 0;
     for (const r of this.rings) r.m.visible = false;
+    this.levi.visible = false;
+    this._leviK = 0;
     for (const st of this.stars) st.m.visible = false;
   }
 }
