@@ -2,3 +2,7 @@ node_modules
 dist
 *.log
 tests/screenshots
+.venv-blender
+art/previews
+*.blend1
+__pycache__
