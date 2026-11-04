@@ -1,5 +1,7 @@
 // 城市場景：天空、地面、可勾索的建築、外圍城牆、燈光與陰影。
 import * as THREE from 'three';
+import { outlineMaterial } from '../fx/toon.js';
+const _Y = new THREE.Vector3(0, 1, 0);
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { facadeTexture, toonFacadeTexture, groundTexture, wallTexture, stoneTexture, barkTexture, mulberry32 } from './textures.js';
@@ -169,7 +171,7 @@ function makeWater(R, shore, y, toon) {
   return m;
 }
 
-export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings = [], style = 'classic') {
+export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings = [], style = 'classic', models = null) {
   const colliders = [];
   const hookables = [];
   const snapAnchors = [];
@@ -641,6 +643,7 @@ export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings
           new THREE.MeshStandardMaterial({ color: '#3f6b3a', roughness: 1, flatShading: true }),
           new THREE.MeshStandardMaterial({ color: '#4d7a40', roughness: 1, flatShading: true }),
         ];
+    const forestTrees = []; // 每棵樹的位置與大小（換成 Blender 模型時對齊用）
     const free = (x, z, r) =>
       Math.hypot(x - spawn.x, z - spawn.z) > r + 12 && clearings.every((c) => Math.hypot(x - c.x, z - c.z) > c.r + r);
     // 起點正前方幾棵樹：一開始準星就有東西可以勾
@@ -656,6 +659,7 @@ export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings
         addTree(x, z, r, 60 + rnd() * 30);
       }
     }
+    if (models?.forestTrees) placeModelTrees(models.forestTrees);
     // 卡通風：林地的灌木叢、花、蘑菇（裝飾，不擋路、不能勾；另一組亂數）
     if (toon) {
       const bushes = [], flowers = [], shrooms = [];
@@ -686,6 +690,47 @@ export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings
       bush.castShadow = !lowSpec;
       scene.add(bush, flower, stem, capM);
     }
+    /**
+     * Blender 做的樹（art/blender/forest_trees.py）：原本的樹幹＋樹冠變成隱形的「勾索／碰撞框」（鋼索照樣勾得到、撞得到），
+     * 看得到的外觀換成模型，對齊每棵樹的位置與大小。同一種零件、同一種材質畫成一個 InstancedMesh。
+     */
+    function placeModelTrees(set) {
+      const KINDS = [['flare', 'oak', 0.32], ['straight', 'pine', 0.24], ['moss', 'ancient', 0.2], ['twist', 'blossom', 0.12], ['flare', 'maple', 0.12]];
+      const groups = new Map(); // 零件名稱 → 實例矩陣清單
+      const push = (key, m) => (groups.get(key) || groups.set(key, []).get(key)).push(m.clone());
+      const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3();
+      for (const t of forestTrees) {
+        let u = drnd(), kind = KINDS[0];
+        for (const k of KINDS) if ((u -= k[2]) <= 0) { kind = k; break; }
+        q.setFromAxisAngle(_Y, drnd() * Math.PI * 2);
+        m4.compose(p.set(t.x, 0, t.z), q, sc.set(t.r * 1.05, t.h, t.r * 1.05));
+        push(`t:${kind[0]}`, m4);
+        m4.compose(p.set(t.x, t.h, t.z), q, sc.setScalar(t.r));
+        push(`c:${kind[1]}`, m4);
+        t.trunk.visible = t.crown.visible = false;
+      }
+      const outline = toon ? outlineMaterial(0.05, '#3f3a2e') : null;
+      for (const [key, mats] of groups) {
+        const [type, name] = key.split(':');
+        const list = (type === 't' ? set.trunks : set.canopies)[name];
+        if (!list) continue;
+        for (const { geometry, material } of list) {
+          const im = new THREE.InstancedMesh(geometry, material, mats.length);
+          mats.forEach((m, i) => im.setMatrixAt(i, m));
+          im.castShadow = !lowSpec;
+          im.receiveShadow = true;
+          im.raycast = () => {}; // 勾索打的是隱形的框，不是模型
+          scene.add(im);
+          if (outline) {
+            const ol = new THREE.InstancedMesh(geometry, outline, mats.length);
+            ol.instanceMatrix = im.instanceMatrix;
+            ol.raycast = () => {};
+            ol.userData.keepMaterial = true;
+            scene.add(ol);
+          }
+        }
+      }
+    }
     function addTree(x, z, r, h) {
       const trunk = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.75, r * 1.15, h, 10), bark);
       trunk.position.set(x, h / 2, z);
@@ -705,6 +750,7 @@ export function buildCity(scene, cfg, spawn, lowSpec, layout = 'city', clearings
       crown.userData.building = true;
       scene.add(crown);
       hookables.push(crown);
+      forestTrees.push({ x, z, r, h, trunk, crown });
       const ch = cr * 0.6, cv = cr * 0.7 * 0.6;
       colliders.push({ min: new THREE.Vector3(x - ch, cy - cv, z - ch), max: new THREE.Vector3(x + ch, cy + cv, z + ch) });
       // 準心吸附點：樹冠下緣一圈

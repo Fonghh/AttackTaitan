@@ -855,8 +855,12 @@ try {
     const crowns = g.city.hookables.filter((m) => m.geometry.type === 'IcosahedronGeometry').length;
     const inside = g.titans.filter((t) => g.city.colliders.some((c) => c.min.y < t.height && t.root.position.x > c.min.x && t.root.position.x < c.max.x && t.root.position.z > c.min.z && t.root.position.z < c.max.z)).length;
     const aim = !!g.aims.auto;
-    return { trees, crowns, titans: g.titans.length, inside, aim, y: +g.pc.pos.y.toFixed(1) };
+    let model = 0;
+    g.scene.traverse((o) => o.isInstancedMesh && o.count >= 5 && model++);
+    const hidden = g.city.hookables.filter((m) => m.geometry.type === 'IcosahedronGeometry' && !m.visible).length;
+    return { trees, crowns, titans: g.titans.length, inside, aim, y: +g.pc.pos.y.toFixed(1), model, hidden };
   });
+  check('[forest] trees use the Blender model (hidden hook boxes stay hookable)', forest.model >= 8 && forest.hidden === forest.crowns && forest.aim, JSON.stringify(forest));
   check('[forest] giant trees (trunks and leafy crowns) to hook, 4 titans in clearings, spawn on the platform', forest.trees > 40 && forest.crowns === forest.trees && forest.titans === 4 && forest.inside === 0 && forest.y > 40 && forest.aim, JSON.stringify(forest));
 
   check('no console/page errors (desktop)', errors.length === 0, errors.slice(0, 3).join(' | '));

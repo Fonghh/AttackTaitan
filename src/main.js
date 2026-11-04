@@ -1,5 +1,7 @@
 import './style.css';
 import { Game } from './core/game.js';
+import { getLevel, LEVELS } from './levels/levels.js';
+import { loadModels } from './world/models.js';
 
 // iOS Safari 會忽略 user-scalable=no：連點按鈕（翻轉衝刺）會觸發「點兩下放大」，縮放還會在重新整理後保留。
 // 1) 遊戲區的快速連點不讓瀏覽器放大（選單面板不攔，按鈕照常能點）
@@ -27,11 +29,21 @@ window.visualViewport?.addEventListener('resize', resetZoom);
 addEventListener('pageshow', resetZoom);
 resetZoom();
 
-try {
-  new Game(document.getElementById('app'));
-} catch (err) {
-  console.error(err);
-  const el = document.getElementById('fatal');
-  el.hidden = false;
-  el.textContent = `無法啟動遊戲（可能是瀏覽器不支援 WebGL）：${err.message}`;
+// 先載入這張地圖要用的 Blender 模型（失敗也沒關係，遊戲會改用程式產生的模型），再開始遊戲
+function start(models) {
+  try {
+    new Game(document.getElementById('app'), { models });
+  } catch (err) {
+    console.error(err);
+    const el = document.getElementById('fatal');
+    el.hidden = false;
+    el.textContent = `無法啟動遊戲（可能是瀏覽器不支援 WebGL）：${err.message}`;
+  }
 }
+const params = new URLSearchParams(location.search);
+let lastLevel = 'training';
+try {
+  lastLevel = localStorage.getItem('lastLevel') || lastLevel;
+} catch {}
+const level = getLevel(params.get('level')) || getLevel(lastLevel) || LEVELS[0];
+loadModels(level.map).then(start, () => start(null));

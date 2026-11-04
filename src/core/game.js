@@ -58,7 +58,7 @@ const storage = (() => {
 })();
 
 export class Game {
-  constructor(container) {
+  constructor(container, opts = {}) {
     const cfg = (this.cfg = CONFIG);
     const params = new URLSearchParams(location.search);
     this.touch = isTouchDevice() || params.has('touch');
@@ -89,7 +89,7 @@ export class Game {
     // 畫風：toon＝卡通（粉彩、圓角，預設）／classic＝寫實；換畫風要重新載入
     cfg.style = this._load('artStyle', 'toon') === 'classic' ? 'classic' : 'toon';
     document.body.classList.toggle('toon', cfg.style === 'toon');
-    this.city = buildCity(this.scene, cfg.world, L.spawn, this.touch, L.map, clearings, cfg.style);
+    this.city = buildCity(this.scene, cfg.world, L.spawn, this.touch, L.map, clearings, cfg.style, opts.models || null);
     if (cfg.style === 'toon') toonifyScene(this.scene); // 城市換成分階明暗的卡通材質
     // 氛圍：草叢、太陽光暈、斜射光束；地圖專屬的空氣漂浮物與暗角色調
     this.atmo = buildAtmosphere(this.scene, { layout: L.map, toon: cfg.style === 'toon', sunDir: new THREE.Vector3(90, 120, 70), colliders: this.city.colliders, radius: cfg.world.wallRadius, lowSpec: this.touch, rnd: mulberry32(5) });
