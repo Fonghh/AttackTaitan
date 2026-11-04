@@ -54,6 +54,15 @@ try {
   await page.click('#btn-start');
   await page.waitForTimeout(500);
   check('game enters playing state', await page.evaluate(() => window.__game.state === 'playing'));
+  const hero = await page.evaluate(() => {
+    const g = window.__game, m = g.model;
+    const V = g.pc.pos.constructor;
+    const b = new V(), t = new V(), l = new V();
+    m.bladeWorld('left', b, t);
+    m.launcherWorld('right', l);
+    return { isHero: !!m.isHero, clips: Object.keys(m.clips || {}).length, blade: +b.distanceTo(t).toFixed(2), launcher: +l.distanceTo(g.pc.pos).toFixed(2) };
+  });
+  check('[hero] Blender hero (rig + clips) replaces the procedural model; blade/launcher markers sane', hero.isHero && hero.clips >= 9 && hero.blade > 0.8 && hero.blade < 1.5 && hero.launcher < 1.2, JSON.stringify(hero));
 
   // 以固定步長直接驅動遊戲（不受無頭瀏覽器幀率影響）
   const sim = await page.evaluate(() => {

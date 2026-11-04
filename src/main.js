@@ -46,4 +46,5 @@ try {
   lastLevel = localStorage.getItem('lastLevel') || lastLevel;
 } catch {}
 const level = getLevel(params.get('level')) || getLevel(lastLevel) || LEVELS[0];
-loadModels(level.map).then(start, () => start(null));
+// ?hero=classic：主角改回程式產生的舊模型
+loadModels(level.map, 8000, { hero: params.get('hero') !== 'classic' }).then(start, () => start(null));

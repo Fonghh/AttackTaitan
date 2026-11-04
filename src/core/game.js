@@ -8,6 +8,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { buildCity } from '../world/city.js';
 import { PlayerController } from '../player/playerController.js';
 import { PlayerModel } from '../player/playerModel.js';
+import { HeroModel } from '../player/heroModel.js';
 import { HookAimer } from '../physics/grapple.js';
 import { CameraRig } from '../camera/cameraRig.js';
 import { Titan } from '../enemy/titan.js';
@@ -95,7 +96,8 @@ export class Game {
     this.atmo = buildAtmosphere(this.scene, { layout: L.map, toon: cfg.style === 'toon', sunDir: new THREE.Vector3(90, 120, 70), colliders: this.city.colliders, radius: cfg.world.wallRadius, lowSpec: this.touch, rnd: mulberry32(5) });
     document.body.dataset.map = L.map;
     this.pc = new PlayerController(cfg);
-    this.model = new PlayerModel(this.scene, cfg);
+    // 主角：有載入 Blender 模型就用它（骨架＋動作），否則用程式產生的模型
+    this.model = opts.models?.hero ? new HeroModel(this.scene, cfg, opts.models.hero) : new PlayerModel(this.scene, cfg);
     // 刀身與裝置的金屬反光：用簡單的室內環境當反射來源（只套在角色的金屬上）
     const pmrem = new THREE.PMREMGenerator(renderer);
     this.model.setEnvMap(pmrem.fromScene(new RoomEnvironment(), 0.04).texture);
