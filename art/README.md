@@ -24,9 +24,12 @@
 
 - **座標**：單位公尺，Z 朝上，臉朝 -Y（Blender 前視圖看到臉），腳底在 Z=0、身體中心在原點正上方。
 - **尺寸**：主角身高約 1.6m（Q 版約 3 頭身）；巨人以 20m 高為基準（遊戲裡再依體型縮放）。
-- **面數上限（手機）**：主角 8,000 三角面、巨人 6,000、小道具 1,500。貼圖最大 1024×1024，能用純色就用純色。
+- **面數上限（手機）**：主角 14,000 三角面（含斗篷與刀箱）、巨人 6,000、小道具 1,500。貼圖最大 1024×1024，能用純色就用純色。
 - **材質名稱**（遊戲依名稱套卡通著色、決定描邊）：`skin`、`hair`、`eye_white`、`iris`、`eye_dark`、`jacket`、`pants`、`boots`、`cape`、`leather`、`metal`、`blade`、`scarf`。
 - **標記點（Empty，名稱固定）**：主角 `blade_L` / `blade_R`（刀尖）、`launcher_L` / `launcher_R`（鋼索發射口）、`nozzle`（噴氣口）；
   巨人 `nape`（後頸弱點）、`eye_L` / `eye_R`、`ankle_L` / `ankle_R`。
-- **骨架與動畫**（之後做）：骨頭名稱 `hips`、`spine`、`chest`、`neck`、`head`、`upperarm_L/R`、`forearm_L/R`、`hand_L/R`、`thigh_L/R`、`shin_L/R`、`foot_L/R`；
-  動畫名稱 `idle`、`run`、`fly`、`slash_cross`、`slash_down`、`slash_side`、`roll`、`backflip`、`hurt`。
+- **骨架與動畫**：骨頭名稱 `hips`、`spine`、`chest`、`neck`、`head`、`upperarm_L/R`、`forearm_L/R`、`hand_L/R`、`thigh_L/R`、`shin_L/R`、`foot_L/R`，斗篷 `cape_1～3`；
+  動畫名稱 `idle`、`run`、`fly`、`slash_cross`、`slash_down`、`slash_side`、`slash_side2`、`roll`、`backflip`、`hurt`。
+  主角的靜止姿勢（rest）＝雙手自然下垂、刀往正前方伸出；硬的零件直接掛在骨頭上（不蒙皮），只有斗篷蒙皮。
+  翻滾、後空翻、被打飛的「整個人轉圈」由遊戲處理，動畫裡只做手腳的動作。
+  動作預覽：`python3 art/tools/animsheet.py hero` → `art/previews/hero-anim-sheet.png`。
