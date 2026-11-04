@@ -126,6 +126,7 @@ def preview(name, views=('front', 'side', 'back', 'three'), size=520, samples=12
     world.node_tree.nodes['Background'].inputs['Strength'].default_value = 0.9
     sun = bpy.data.objects.new('_sun', bpy.data.lights.new('_sun', 'SUN'))
     sun.data.energy = 3.0
+    sun.data.angle = math.radians(18)  # 柔和的陰影（預覽看得清楚造型，不會有硬邊的陰影線）
     sun.rotation_euler = (math.radians(50), 0, math.radians(30))
     sc.collection.objects.link(sun)
     lo, hi = _bounds()
